@@ -103,6 +103,16 @@ class EventStore:
         # 5. Initialize schema (idempotent)
         self._init_event_log_schema()
 
+        # S1 门面化：event_log 的存储 SQL 收口到 PlatformStore（唯一写入者，
+        # 不变量 7）。EventStore 保留全部编排（trace/cache/SSE/live/fanout/
+        # projector flush/降级模式），只把 _persist/_replay/_next_seq 的
+        # SQLite 访问转调行级 API。兼容单库模式指向既有 .session.db（S2 拆分）。
+        self._ps = None
+        if not isinstance(self._backend, InMemoryStore):
+            from ..storage.platform_store import PlatformStore
+
+            self._ps = PlatformStore(db_path=self._db_path)
+
     def _init_event_log_schema(self) -> None:
         if isinstance(self._backend, InMemoryStore):
             # In-memory store doesn't persist; event_log lives only in cache
@@ -413,7 +423,6 @@ class EventStore:
                 "degraded mode and cannot host forkable sessions."
             )
 
-        conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
         max_seq = self.last_seq(session_id)
         if at_seq > max_seq:
             raise ValueError(
@@ -427,43 +436,16 @@ class EventStore:
                 f"new_session_id {new_sid!r} already has events"
             )
 
-        with self._backend._lock if hasattr(self._backend, "_lock") else _noop_cm():  # type: ignore[attr-defined]
-            # Copy [0, at_seq] events into the new session. The new
-            # session's seq space is 1..N where N == at_seq (a
-            # contiguous prefix). Re-id each row so the EventV2 PKs
-            # don't collide with the source session.
-            copied = conn.execute(
-                """
-                INSERT INTO event_log
-                    (id, aggregate_id, seq, type, data_json,
-                     time_created, parent_event_id, branch_id)
-                SELECT
-                    lower(hex(randomblob(16))),
-                    ?,
-                    ROW_NUMBER() OVER (ORDER BY seq ASC),
-                    type, data_json, time_created,
-                    parent_event_id, branch_id
-                FROM event_log
-                WHERE aggregate_id = ? AND seq <= ?
-                  AND branch_id = 'main'
-                ORDER BY seq ASC
-                """,
-                (new_sid, session_id, at_seq),
-            ).rowcount
-            conn.commit()
+        # S1 门面化：复制 SQL 收口到 PlatformStore.copy_prefix（新 seq 空间
+        # 1..N、行 id 重新生成、锁内快照——语义与原实现逐项一致）。
+        copied = self._ps.copy_prefix(session_id, at_seq, new_sid)
         return new_sid, int(copied)
 
     def count(self, session_id: str | None = None) -> int:
         """Total events (optionally filtered by session)."""
         try:
-            if hasattr(self._backend, "_ensure_conn"):
-                conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-                if session_id is None:
-                    return conn.execute("SELECT count(*) FROM event_log").fetchone()[0]
-                return conn.execute(
-                    "SELECT count(*) FROM event_log WHERE aggregate_id = ?",
-                    (session_id,),
-                ).fetchone()[0]
+            if not isinstance(self._backend, InMemoryStore) and self._ps is not None:
+                return self._ps.count_events(session_id)
             else:
                 # InMemoryStore
                 data = getattr(self._backend, "_data", {})
@@ -485,21 +467,13 @@ class EventStore:
                 event.aggregate_id, []
             ).append(event)
             return
-        conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
+        # S1 门面化：行组装 + seq 原子分配都在 PlatformStore（唯一写入者）。
+        # 以库分配的 seq 为准回写 EventV2（与 _create_and_persist 预分配值
+        # 可能不同——两锁窗口内的并发插入以库为准）。
         row = event.to_row()
-        # P0-1 A3: include parent_event_id / branch_id so trace trees and
-        # fork branches survive the SQLite round-trip. branch_id has
-        # schema-level DEFAULT 'main' so omitting it (in pre-A3 callers)
-        # is still safe — but the unified EventV2 always carries it now.
-        conn.execute(
-            "INSERT INTO event_log (id, aggregate_id, seq, type, data_json, "
-            "time_created, parent_event_id, branch_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (row["id"], row["aggregate_id"], row["seq"], row["type"],
-             row["data_json"], row["time_created"],
-             row["parent_event_id"], row["branch_id"]),
-        )
-        conn.commit()
+        row["branch_id"] = event.branch_id
+        assigned = self._ps.append_event_row(row)
+        event.seq = assigned
 
     def _replay(
         self,
@@ -511,46 +485,18 @@ class EventStore:
         limit: int | None = None,
     ) -> list[EventV2]:
         try:
-            if hasattr(self._backend, "_ensure_conn"):
-                conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-                clauses = ["aggregate_id = ?", "seq > ?"]
-                params: list[Any] = [session_id, from_seq]
-                if types:
-                    placeholders = ",".join("?" for _ in types)
-                    clauses.append(f"type IN ({placeholders})")
-                    params.extend(types)
-                if branch_id is not None:
-                    clauses.append("branch_id = ?")
-                    params.append(branch_id)
-                sql = (
-                    "SELECT id, aggregate_id, seq, type, data_json, time_created, "
-                    "parent_event_id, branch_id FROM event_log "
-                    f"WHERE {' AND '.join(clauses)} ORDER BY seq ASC"
+            if not isinstance(self._backend, InMemoryStore) and self._ps is not None:
+                # S1 门面化：WHERE/ORDER 语义在 PlatformStore.replay_rows
+                # （与旧 SQL 逐项一致），这里只做行 → EventV2 映射。
+                # 以当前 _backend 为准（测试可能在构造后替换为 InMemoryStore）。
+                rows = self._ps.replay_rows(
+                    session_id,
+                    from_seq=from_seq,
+                    types=types,
+                    branch_id=branch_id,
+                    limit=limit,
                 )
-                if limit is not None:
-                    sql += " LIMIT ?"
-                    params.append(limit)
-                rows = conn.execute(sql, params).fetchall()
-                # SQLiteStore leaves row_factory unset (memory_manager uses
-                # tuple indexing), so map each tuple to the dict shape the
-                # unified EventV2.from_row() expects. The P0-1 A3 columns
-                # (7 = parent_event_id, 8 = branch_id) are always SELECTed
-                # here; rows written by pre-A3 code will simply have NULL /
-                # the schema DEFAULT for those positions, and EventV2.from_row
-                # maps them to None / "main".
-                def _row_to_dict(r: tuple) -> dict[str, Any]:
-                    return {
-                        "id": r[0],
-                        "aggregate_id": r[1],
-                        "seq": r[2],
-                        "type": r[3],
-                        "data_json": r[4],
-                        "time_created": r[5],
-                        "parent_event_id": r[6],
-                        "branch_id": r[7] or "main",
-                    }
-
-                return [EventV2.from_row(_row_to_dict(r)) for r in rows]
+                return [EventV2.from_row(r) for r in rows]
             else:
                 # InMemoryStore — apply the same filters in Python so the
                 # contract is consistent across backends. ``_persist``
@@ -579,14 +525,11 @@ class EventStore:
 
     def _next_seq(self, session_id: str) -> int:
         try:
-            if hasattr(self._backend, "_ensure_conn"):
-                conn = self._backend._ensure_conn()  # type: ignore[attr-defined]
-                row = conn.execute(
-                    "SELECT COALESCE(MAX(seq), 0) FROM event_log "
-                    "WHERE aggregate_id = ?",
-                    (session_id,),
-                ).fetchone()
-                return (row[0] if row else 0) + 1
+            if not isinstance(self._backend, InMemoryStore) and self._ps is not None:
+                # S1 门面化：预览语义（下一 seq）。真实分配在
+                # append_event_row 内原子完成——并发窗口内可能偏大，
+                # 以 persist 回写为准。
+                return self._ps.latest_seq(session_id) + 1
             else:
                 # InMemoryStore — count from the EventV2 mirror that
                 # ``_persist`` writes, not the backend's Message dict

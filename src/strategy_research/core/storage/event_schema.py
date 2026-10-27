@@ -36,6 +36,7 @@ import sqlite3
 __all__ = [
     "EVENT_LOG_DDL",
     "EVENT_LOG_INDEXES",
+    "ENVELOPE_COLUMNS",
     "ensure_event_log_schema",
     "migrate_event_log_unique",
 ]
@@ -60,6 +61,9 @@ CREATE TABLE IF NOT EXISTS event_log (
     time_created REAL NOT NULL,
     parent_event_id TEXT,
     branch_id TEXT NOT NULL DEFAULT 'main',
+    session_key TEXT,
+    run_id TEXT,
+    schema_v TEXT NOT NULL DEFAULT '1',
     FOREIGN KEY (aggregate_id) REFERENCES sessions(id) ON DELETE CASCADE,
     UNIQUE (aggregate_id, branch_id, seq)
 )
@@ -76,7 +80,23 @@ EVENT_LOG_INDEXES = (
         "CREATE INDEX IF NOT EXISTS idx_event_log_type_time "
         "ON event_log(type, time_created)",
     ),
+    (
+        "idx_event_log_run_id",
+        "CREATE INDEX IF NOT EXISTS idx_event_log_run_id "
+        "ON event_log(run_id)",
+    ),
 )
+
+# P-1 信封列（S1，docs/s1-event-protocol-unification-design-20261027.md §2）。
+# canonical 表 = 信封超集：type 即 kind、time_created 即 ts，另补三列。
+_ENVELOPE_COLUMNS = (
+    ("session_key", "session_key TEXT"),
+    ("run_id", "run_id TEXT"),
+    ("schema_v", "schema_v TEXT NOT NULL DEFAULT '1'"),
+)
+
+# Public alias: the P-1 envelope column names added on top of the P0-1 table.
+ENVELOPE_COLUMNS = tuple(c[0] for c in _ENVELOPE_COLUMNS)
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -148,6 +168,10 @@ def ensure_event_log_schema(conn: sqlite3.Connection) -> None:
         "branch_id",
         "branch_id TEXT NOT NULL DEFAULT 'main'",
     )
+    # Backfill P-1 envelope columns (S1). Idempotent ALTERs; existing rows
+    # get schema_v='1' via the DEFAULT, session_key/run_id stay NULL.
+    for _col, ddl in _ENVELOPE_COLUMNS:
+        _add_column(conn, "event_log", _col, ddl)
 
     for _name, ddl in EVENT_LOG_INDEXES:
         conn.execute(ddl)
@@ -186,10 +210,15 @@ def migrate_event_log_unique(conn: sqlite3.Connection) -> bool:
             f"{sorted(missing)}. Run ensure_event_log_schema() first."
         )
 
-    select_cols = (
-        "id, aggregate_id, seq, type, data_json, time_created, "
-        "parent_event_id, branch_id"
-    )
+    # Copy every column the source table actually has (P0-1: 8 columns;
+    # S1 adds the P-1 envelope columns). Destination DDL below carries the
+    # full current set, so copying a subset is always safe.
+    base_cols = [
+        "id", "aggregate_id", "seq", "type", "data_json",
+        "time_created", "parent_event_id", "branch_id",
+    ]
+    envelope_present = [c for c, _ in _ENVELOPE_COLUMNS if c in columns]
+    select_cols = ", ".join(base_cols + envelope_present)
 
     # Close any pending implicit transaction so BEGIN IMMEDIATE doesn't
     # collide with a DDL/DML the caller has staged. The rebuild is
@@ -210,6 +239,9 @@ def migrate_event_log_unique(conn: sqlite3.Connection) -> bool:
                 time_created REAL NOT NULL,
                 parent_event_id TEXT,
                 branch_id TEXT NOT NULL DEFAULT 'main',
+                session_key TEXT,
+                run_id TEXT,
+                schema_v TEXT NOT NULL DEFAULT '1',
                 FOREIGN KEY (aggregate_id) REFERENCES sessions(id)
                     ON DELETE CASCADE,
                 UNIQUE (aggregate_id, branch_id, seq)
