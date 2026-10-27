@@ -712,22 +712,49 @@ def _get_gateway():
 
 
 async def _send_via_gateway(session_id: str, content: str) -> dict:
-    """新路径：WorkRequest → EntryPoint → 准入 → 引擎 → 事件流。"""
-    from strategy_research.core.gateway import api_chat_request
+    """新路径：WorkRequest → EntryPoint → 准入 → 引擎 → 事件流。
 
+    P5-1：补齐历史注入与持久化，**照抄旧路径的两条机制**（不改选型）：
+    - 读历史 → ``SessionStore.get_messages`` + ``_convert_messages_to_history``
+    - 写消息 → ``event_bus.emit`` → projector（``flush_to_messages=True``）
+
+    顺序关键：**先读历史、再 emit 本轮事件**——否则当前轮会被重复注入。
+    """
+    import time as _time
+    import uuid as _uuid
+
+    from strategy_research.core.gateway import api_chat_request
+    from strategy_research.core.orchestration import WorkKind
+
+    service = _get_session_service()
+
+    # ── ① 读历史（与旧路径同一函数、同一参数）──────────────────
+    history: list[dict] = []
+    try:
+        cfg = _build_llm_config()
+        keep_all = bool(
+            cfg and cfg.compact_config
+            and cfg.compact_config.keep_all_compactions_in_history
+        )
+        stored = service.store.get_messages(session_id, limit=100)
+        history = service._convert_messages_to_history(
+            stored, keep_all_compactions=keep_all,
+        )
+    except Exception as exc:  # noqa: BLE001 —— 历史缺失不阻断对话
+        logger.warning("send_via_gateway: history load failed: %s", exc)
+
+    # ── ② 提交（历史随 payload 进入引擎）───────────────────────
     gw = _get_gateway()
-    receipt = gw.entry.submit(api_chat_request(session_id, content))
+    receipt = gw.entry.submit(
+        api_chat_request(session_id, content, history=history)
+    )
     if not receipt.accepted:
         raise HTTPException(
             status_code=400,
             detail={"error": "entry_rejected", "reason": str(receipt.reason)},
         )
 
-    # 同步驱动队列（A2 的后台消费者会替换这段）
-    # kind 过滤：chat 只领 CHAT 工单——AUTOMATION 工单归 scheduler 的 mailbox
-    # 消费者（3c kind 归属，见 stage-3c 设计 §1）。
-    from strategy_research.core.orchestration import WorkKind
-
+    # ── ③ 执行（kind 过滤：chat 只领 CHAT；AUTOMATION 归 scheduler）──
     runs = await asyncio.get_running_loop().run_in_executor(
         None, lambda: gw.run_once({WorkKind.CHAT}),
     )
@@ -739,8 +766,32 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
             status_code=502,
             detail={"error": "run_failed", "reason": run.error or ""},
         )
+
+    # ── ④ 成功后只发事件 → projector 落库（与旧路径同源）─────────
+    # 不调 persist_message：旧路径注释明确「not via direct store.append_message()」，
+    # 且两路同写会撞 UNIQUE 或产生重复行（已实测）。
+    user_mid = str(_uuid.uuid4())
+    assistant_mid = run.run_id  # 新路径无 attempt，用 run_id 作消息标识
+    try:
+        service.event_bus.emit(session_id, "message_received", {
+            "message_id": user_mid,
+            "user_message_id": user_mid,
+            "assistant_message_id": assistant_mid,
+            "role": "user",
+            "content": content,
+            "created_at": _time.time(),
+        })
+        service.event_bus.emit(session_id, "assistant_message", {
+            "message_id": assistant_mid,
+            "role": "assistant",
+            "content": run.answer,
+            "created_at": _time.time(),
+        })
+    except Exception as exc:  # noqa: BLE001 —— 落库失败不吞掉回答
+        logger.warning("send_via_gateway: persist via event failed: %s", exc)
+
     return {
-        "message_id": None,
+        "message_id": assistant_mid,
         "attempt_id": run.run_id,
         "reply": run.answer,
         "status": "completed",

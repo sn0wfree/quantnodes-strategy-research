@@ -15,8 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from strategy_research.core.runtimes.graph_engine import GraphEngine
 from strategy_research.core.orchestration import EntryPoint, WorkRequest
+from strategy_research.core.runtimes.graph_engine import GraphEngine
 
 EventSink = Callable[[str, dict], None]
 
@@ -77,8 +77,19 @@ class SessionController:
         self._sink("run.started", {"run_id": run_id, "kind": request.kind.value})
 
         engine = self._build_engine()
+        # P5-1：payload 可携带已格式化历史（旧路径 _convert_messages_to_history 的
+        # 输出同构）。顺序：历史在前、当前输入在后——调用方须在 emit 本轮事件
+        # **之前**读取历史，否则当前轮会重复注入。
+        history = request.payload.get("history")
+        messages: list[dict] = []
+        if isinstance(history, list):
+            messages.extend(
+                m for m in history
+                if isinstance(m, dict) and m.get("role") and "content" in m
+            )
+        messages.append({"role": "user", "content": _payload_text(request)})
         state = {
-            "messages": [{"role": "user", "content": _payload_text(request)}],
+            "messages": messages,
             "session_id": session_id,
             "turn_id": turn_id,
             "run_id": run_id,

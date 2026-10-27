@@ -1,18 +1,17 @@
-# P5-1 设计 — Gateway chat 补齐（历史 / 事件 / 身份），然后删旧分支 — 2026-10-27
+# P5-1 设计 — Gateway chat 补齐（历史 / 事件 / 身份）— 2026-10-27
 
-> ## ⚠️ 本设计已作废（2026-10-27 同日评审）
+> **状态：有效（v3，2026-10-27 定稿）**
 >
-> 代码图审视（`code-graph-vs-architecture-gap-20261027.md`）证明本文件的前提
-> 不成立：它假设「复用 MemoryManager + SessionService」是正确目标，但架构定案
-> 是 **PlatformStore 是消息与事件的唯一写入者（不变量 7）**，现状的三写者
-> （memory_manager / projector / web_session）恰恰是待收敛的技术债。
+> 修订记录：
+> - v1 假设复用 PlatformStore 多库形态 → 分库方案已回退，该前提消失；
+> - v2 曾误判「只走 persist_message、不发事件」→ 实测确认 `SessionService`
+>   根本不调 `persist_message`（见 `service.py:159` 注释），旧路径是
+>   **只发事件 → projector 落库**；
+> - **v3 定案（用户拍板）：照抄旧路径，不改选型**
+>   - 读历史 → `SessionStore.get_messages` + `_convert_messages_to_history`
+>   - 写消息 → `event_bus.emit` → projector
 >
-> 正确顺序：**先做 0.4 数据面收敛，再做 chat 补齐**（否则写完要推翻）。
-> 保留本文件仅为记录设计推演过程，实施请以差距报告 §4 的修正路线为准。
-
-> 前置：阶段 4 清理清单 §1.1 记录了「chat/CLI 旧分支暂缓删除」的原因。
-> 目标：补齐新路径缺失的三项能力，做**执行等价**验证，然后删除旧分支与
-> `new_entry_enabled` 门——所有入口最终只剩一条通道。
+> **本次范围不含「删除旧分支」**（前置条件：新路径需先具备流式输出与工具链装配）。
 
 ---
 
@@ -45,31 +44,62 @@
 那条链（`event_log` + `messages` + projector）。两条链目前并存，合并属后续阶段
 （0.4/E5）。P5-1 的任务是**让 chat 路径接入 WebUI 正在用的那条链**，避免维护双写。
 
-## 3. 实现（`_send_via_gateway` 内，约 40 行）
+## 3. 实现（`_send_via_gateway` 内，约 50 行）
 
+**照抄旧路径的两条机制，不引入第三种做法：**
+
+```python
+service = _get_session_service()
+
+# ① 读历史（与旧路径同一函数、同一参数）
+messages = service.store.get_messages(session_id, limit=100)
+history = service._convert_messages_to_history(
+    messages,
+    keep_all_compactions=bool(
+        cfg and cfg.compact_config
+        and cfg.compact_config.keep_all_compactions_in_history
+    ),
+)
+
+# ② 提交（历史进 payload，供引擎构造 messages）
+receipt = gw.entry.submit(api_chat_request(session_id, content, history=history))
+
+# ③ 执行（现有 run_once({CHAT})）
+
+# ④ 成功后：只发事件 → projector 落库（与旧路径同源）
+user_mid = str(uuid.uuid4())
+service.event_bus.emit(session_id, "message_received", {
+    "message_id": user_mid,
+    "user_message_id": user_mid,
+    "role": "user",
+    "content": content,
+    "created_at": time.time(),
+})
+service.event_bus.emit(session_id, "assistant_message", {
+    "message_id": run.run_id,       # 新路径无 attempt，用 run_id 作消息标识
+    "role": "assistant",
+    "content": run.answer,
+    "created_at": time.time(),
+})
+
+# ⑤ 返回
+return {"message_id": run.run_id, "attempt_id": run.run_id,
+        "reply": run.answer, "status": "completed"}
 ```
-① 读历史
-   mm = get_default_memory_manager()
-   history = await mm.get(session_id)          # 失败 → 空历史（不阻断）
-② 提交，并把历史带进 payload
-   payload = {"text": content, "history": history}
-   receipt = gw.entry.submit(api_chat_request(session_id, content, history=history))
-③ 引擎执行（现有 run_once({CHAT})）
-④ 成功：写消息 + 发事件
-   user_mid = await mm.append(session_id, "user", content)
-   asst_mid = await mm.append(session_id, "assistant", run.answer)
-   service = _get_session_service()
-   service.emit_chat_completed(session_id, user_mid, asst_mid, run)  # 复用 EventStore
-⑤ 返回 {"message_id": asst_mid, "attempt_id": run.run_id, "reply": ...}
-```
+
+**为什么只发事件、不调 `persist_message`**（实测依据）：
+- `SessionService` 的注释明确写着「user message is persisted via EventBusV2 →
+  projector.flush(), **not** via direct store.append_message()」（`service.py:159`）；
+- `persist_message` 只被 `_run_agent_loop_background` / compaction / slash_commands 使用，
+  与 `/send` 这条链无关；
+- 两路同时写会撞车：同 `message_id` → `UNIQUE constraint failed`（被 except 吞掉）、
+  projector 的 UPSERT 胜出；不同 id → **两行重复**（已实测）。
 
 **历史注入点**：`WorkRequest.payload["history"]`。`SessionController._execute` 目前只取
 `payload["text"]` 构造单条 user 消息——扩展为「history + 当前 user 消息」。
-这是**协议字段扩展**（契约白名单需同步加 `history`），且只在 payload 内，不进事件。
+**注意顺序**：先读历史、再 emit——否则当前轮会出现在历史里导致重复注入。
 
-**失败语义**：引擎失败（`run.ok == False`）→ 消息不写、事件记 `chat_failed`，
-返回 502（现状）。成功但持久化失败 → 返回 200 + `warning` 字段（用户可见的回答
-不该因为存储抖动丢掉）。
+**失败语义**：引擎失败（`run.ok == False`）→ 不发事件、不写库，返回 502（现状）。
 
 ## 4. 执行等价验收（replan v2 §5 方法论）
 

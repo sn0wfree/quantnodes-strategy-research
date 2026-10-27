@@ -177,7 +177,14 @@ class TestChatAPI:
         assert "event_id" in data
         assert data["status"] == "processing"
 
-    def test_send_sync(self, client):
+    def test_send_sync(self, client, monkeypatch):
+        """Legacy branch: stubbed service without attempt_id -> 504.
+
+        `/send` now defaults to the Gateway path (P5-1), so this test opts into
+        the legacy route explicitly to keep covering it. The Gateway path has
+        its own suite in tests/test_p51_chat_persistence.py.
+        """
+        monkeypatch.setenv("QNODES_NEW_ENTRY", "0")
         # Session must exist before sending (ownership check)
         sid = client.post("/api/chat/session", json={"title": "S"}).json()["id"]
         with self._stub_send():
@@ -185,8 +192,6 @@ class TestChatAPI:
                 "session_id": sid,
                 "content": "Hello",
             })
-        # Stub service has no attempt_id → 504 (LLM response timed out)
-        # is the expected response for a fully-stubbed pipeline
         assert res.status_code == 504
 
 

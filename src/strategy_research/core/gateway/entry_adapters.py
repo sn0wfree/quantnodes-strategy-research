@@ -44,17 +44,28 @@ def research_graph_enabled() -> bool:
     return True
 
 
-def api_chat_request(session_id: str, content: str) -> WorkRequest:
+def api_chat_request(
+    session_id: str,
+    content: str,
+    *,
+    history: list[dict] | None = None,
+) -> WorkRequest:
     """把 API chat 请求翻译成 WorkRequest。
 
     session_key 用 `chat:<session_id>`——同一物理会话的请求进同一 mailbox
     （session=串行域）。协议字段（HTTP headers 等）在此剥除，不进入 payload。
+
+    ``history``：已格式化的对话历史（与旧路径 `_convert_messages_to_history`
+    输出同构），供引擎构造完整 messages。仅入 payload，不进事件。
     """
+    payload: dict[str, object] = {"text": content}
+    if history:
+        payload["history"] = history
     return WorkRequest(
         kind=WorkKind.CHAT,
         source=SourceKind.API_CHAT,
         session_key=f"chat:{session_id}",
-        payload={"text": content},
+        payload=payload,
     )
 
 
