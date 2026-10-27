@@ -108,7 +108,7 @@ S5  全量分道跑 + 审计门②                                              
 | **P5-1c** | ⏸ **已标记待做**：删除旧 chat 分支 + `new_entry_enabled` 门（清单见 `todo-remove-legacy-chat-branch-20261027.md`） | 无（前置已就位） | 入口真正只剩一条路；删除前需确认 `/send_async` 与 study/goal 的依赖面 |
 | **P5-2** | ✅ **已完成**（`5c4c544`，2026-10-27）：langgraph 分支退役——净删 2782 行（langgraph_engine 679 + runner_langgraph 155 + `_run_langgraph_branch` + checkpoint DDL + `_rebuild_phase_outputs` + 6 个纯分支测试文件）；3 个引擎无关方法（`_load_graph`/`_wait_for_approval`/`_expire_interrupt`）从 mixin 恢复到 runner 本体；`engine='langgraph'` 存量值 warning 后回落图路径（真实 DB 零行，实测无影响）。设计：`stage-p52-langgraph-retirement-design-20261027.md` | 无（前置已就位） | 单引擎达成：研究轮唯一执行体 = GraphEngine 图路径 |
 | P5-3 | SSE 单轨（删 `api/sse_buffer.py` + `api/session/bridge_v2.py`） | 3b-2 一直延后 | 8 个生产文件 + 7 个测试文件，属独立工程 |
-| P5-4 | `ContextBuilder`（4 builder）并入 ContextHub | AgentLoop 迁移 | 合并不是删文件，要迁调用方 |
+| **P5-4** | ✅ **已完成**（`7e6e183d`，2026-10-27）：ContextHub W0 骨架落地 + pre-run 上下文（goal/memory）迁入。**清单前提修正**：ContextHub 原本不存在于代码（差距图 §2.5）；「4 builder」= injector 家族——goal+memory 转 provider 整链桥接（检索 query 链式语义保持，逐字节等价测试钉死），todos 留 W1、continuation 不转（决策类）。设计：`stage-p54-context-hub-w0-design-20261027.md`。W1/W2 尾项：todos provider 化、记忆注入三改、ContextPlan 并入仲裁面 | 无 | 「目录供件 → 事件记录 → 上下文组装 → LLM」三中枢之二落地（hub + EventStore） |
 | P5-5 | 安全债 ×4（9/5 评估记录） | 无 | 与本次架构重构正交，需独立排查 |
 
 ## 8. 本轮实测数据
