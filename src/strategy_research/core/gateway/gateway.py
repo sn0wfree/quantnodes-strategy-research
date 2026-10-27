@@ -29,6 +29,8 @@ class Gateway:
         sink: Callable[[str, dict], None] | None = None,
         engine_factory: Callable[[], Any] | None = None,
         data_dir: str | Path | None = None,
+        registry: Any | None = None,
+        stream: bool = False,
     ) -> None:
         self._events: list[tuple[str, dict]] = []
         self._external_sink = sink
@@ -38,6 +40,9 @@ class Gateway:
         self.controller = SessionController(
             self.entry, client=client, system=system, sink=combined,
             engine_factory=engine_factory,
+            # P5-1b：有 registry 时控制器默认图用 react 节点（无工具调用时
+            # 退化为单次 LLM），否则纯 llm 节点。
+            registry=registry, stream=stream,
         )
         # 阶段 3b：PlatformStore（事件持久化 + blob + artifact 登记）
         self._store = None
@@ -56,6 +61,27 @@ class Gateway:
         self._default_sink(kind, data)
         if self._external_sink is not None:
             self._external_sink(kind, data)
+
+    def install_sink(self, sink: Callable[[str, dict], None]) -> None:
+        """追加一个外部 sink（P5-1b：用于把引擎事件转发到 SSE）。
+
+        与构造时的 ``sink`` 并存（不替换内部缓冲）。转发异常只记日志，
+        不能影响引擎主路径。
+        """
+        prev = self._external_sink
+
+        def chained(kind: str, data: dict) -> None:
+            if prev is not None:
+                try:
+                    prev(kind, data)
+                except Exception:  # noqa: BLE001
+                    logger.debug("previous sink failed: %s", kind, exc_info=True)
+            try:
+                sink(kind, data)
+            except Exception:  # noqa: BLE001
+                logger.debug("installed sink failed: %s", kind, exc_info=True)
+
+        self._external_sink = chained
 
     def _default_sink(self, kind: str, data: dict) -> None:
         self._events.append((kind, data))

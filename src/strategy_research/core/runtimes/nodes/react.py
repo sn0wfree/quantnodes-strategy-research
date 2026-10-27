@@ -15,8 +15,7 @@
 from __future__ import annotations
 
 import json
-import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from strategy_research.core.agent.strategy.budget import BudgetLimits
@@ -33,6 +32,8 @@ class ReactConfig:
     # F3：注入式预算（fanout 分支切片优先）；给对象=同一实例直接记账，
     # 传限额只复制上限、消耗回不到父账本（settle 会失真）。
     budget: RunBudget | None = None
+    # P5-1b：流式（每轮 LLM 调用逐 chunk 发 text_delta/thinking_delta）
+    stream: bool = False
 
 
 def make_react_node(
@@ -66,7 +67,9 @@ def make_react_node(
                 stop_reason = f"budget:{reason}"
                 break
 
-            response = client.chat(messages, tools=registry.get_definitions())
+            response = _call_llm(
+                client, messages, registry, cfg, run_id, emit,
+            )
             usage.record(getattr(response, "usage", None))
 
             if not response.has_tool_calls():
@@ -108,3 +111,91 @@ def make_react_node(
         return updated
 
     return react_node
+
+
+@dataclass
+class _AggregatedResponse:
+    """流式聚合后的响应，字段形状与非流式响应对齐。"""
+
+    content: str = ""
+    usage: dict | None = None
+    tool_calls: list = field(default_factory=list)
+
+    def has_tool_calls(self) -> bool:
+        return bool(self.tool_calls)
+
+
+@dataclass
+class _ToolCallStub:
+    """由流式增量还原出的工具调用（供后续 registry.execute 使用）。"""
+
+    id: str
+    name: str
+    arguments: dict
+
+
+def _call_llm(
+    client: Any,
+    messages: list[dict],
+    registry: Any,
+    cfg: ReactConfig,
+    run_id: str,
+    emit: Callable[[str, dict], None],
+) -> Any:
+    """调用 LLM：流式或非流式，返回形状一致的对象。
+
+    流式下 ``delta_tool_calls`` 是增量分片（parser 注释：arguments may span
+    multiple chunks），必须按 index 聚合、arguments **字符串拼接**——覆盖会
+    静默截断参数（P5-1b 设计 §3.2.1，已用真实 OpenAI 分片验证）。
+    """
+    if not (cfg.stream and hasattr(client, "stream")):
+        return client.chat(messages, tools=registry.get_definitions())
+
+    parts: list[str] = []
+    thinking_chars = 0
+    usage: dict = {}
+    acc: dict[int, dict] = {}
+    try:
+        for chunk in client.stream(messages, tools=registry.get_definitions()):
+            delta = getattr(chunk, "delta_content", "") or ""
+            if delta:
+                parts.append(delta)
+                emit("text_delta", {"run_id": run_id, "delta": delta})
+            think = getattr(chunk, "delta_thinking", "") or ""
+            if think:
+                thinking_chars += len(think)
+                emit("thinking_delta", {"run_id": run_id, "delta": think})
+            for tc in getattr(chunk, "delta_tool_calls", None) or []:
+                idx = tc.get("index", 0)
+                slot = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["arguments"] += fn["arguments"]
+            chunk_usage = getattr(chunk, "usage", None)
+            if isinstance(chunk_usage, dict) and chunk_usage:
+                usage = chunk_usage
+    except Exception as exc:  # noqa: BLE001 —— 流中断保留已收内容
+        emit("stream.failed", {"run_id": run_id, "error": str(exc)})
+
+    if thinking_chars:
+        emit("thinking_done", {"run_id": run_id, "chars": thinking_chars})
+
+    tool_calls: list[_ToolCallStub] = []
+    for idx in sorted(acc):
+        slot = acc[idx]
+        if not slot["name"]:
+            continue
+        try:
+            args = json.loads(slot["arguments"]) if slot["arguments"] else {}
+        except json.JSONDecodeError:
+            args = {}
+        tool_calls.append(
+            _ToolCallStub(id=slot["id"] or f"call_{idx}", name=slot["name"], arguments=args)
+        )
+    return _AggregatedResponse(
+        content="".join(parts), usage=usage or None, tool_calls=tool_calls,
+    )

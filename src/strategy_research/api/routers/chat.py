@@ -718,6 +718,11 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
     - 读历史 → ``SessionStore.get_messages`` + ``_convert_messages_to_history``
     - 写消息 → ``event_bus.emit`` → projector（``flush_to_messages=True``）
 
+    P5-1b：流式与工具链——
+    - Gateway 装配 tool registry（shell 工具按 ``_shell_tools_enabled`` 门禁）
+    - 引擎事件经 ``install_sink`` 转发为前端词表（text_delta / tool_call / …）
+    - 末尾补发 ``agent_done``
+
     顺序关键：**先读历史、再 emit 本轮事件**——否则当前轮会被重复注入。
     """
     import time as _time
@@ -745,6 +750,10 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
 
     # ── ② 提交（历史随 payload 进入引擎）───────────────────────
     gw = _get_gateway()
+    user_mid = str(_uuid.uuid4())
+    assistant_mid_holder: dict[str, str] = {}
+    _install_chat_event_bridge(gw, session_id, assistant_mid_holder)
+
     receipt = gw.entry.submit(
         api_chat_request(session_id, content, history=history)
     )
@@ -762,6 +771,8 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
         raise HTTPException(status_code=504, detail="no run executed")
     run = runs[-1]
     if not run.ok:
+        _push_sse("error", {"message_id": run.run_id, "error": run.error or ""}, session_id)
+        _push_sse("agent_done", {"message_id": run.run_id, "status": "error"}, session_id)
         raise HTTPException(
             status_code=502,
             detail={"error": "run_failed", "reason": run.error or ""},
@@ -770,7 +781,6 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
     # ── ④ 成功后只发事件 → projector 落库（与旧路径同源）─────────
     # 不调 persist_message：旧路径注释明确「not via direct store.append_message()」，
     # 且两路同写会撞 UNIQUE 或产生重复行（已实测）。
-    user_mid = str(_uuid.uuid4())
     assistant_mid = run.run_id  # 新路径无 attempt，用 run_id 作消息标识
     try:
         service.event_bus.emit(session_id, "message_received", {
@@ -790,12 +800,58 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
     except Exception as exc:  # noqa: BLE001 —— 落库失败不吞掉回答
         logger.warning("send_via_gateway: persist via event failed: %s", exc)
 
+    # ── ⑤ 收尾事件 ─────────────────────────────────────────
+    _push_sse("agent_done", {"message_id": assistant_mid, "status": "completed"}, session_id)
+
     return {
         "message_id": assistant_mid,
         "attempt_id": run.run_id,
         "reply": run.answer,
         "status": "completed",
     }
+
+
+def _push_sse(kind: str, data: dict, session_id: str) -> None:
+    """把一条事件推入 SSE 缓冲（失败只记日志，不影响主路径）。"""
+    try:
+        sse_buffer.push(kind, json.dumps(data, ensure_ascii=False), session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("sse push failed (%s): %s", kind, exc)
+
+
+def _install_chat_event_bridge(
+    gw: Any, session_id: str, message_id_holder: dict[str, str],
+) -> None:
+    """把引擎的平台事件翻译成前端词表并推 SSE（P5-1b）。
+
+    引擎事件（node.started / text_delta / tool.started）是平台观测语义；
+    前端需要 tool_call / tool_result / text_delta 等产品语义。翻译层放这里，
+    不改引擎。
+    """
+    mapping = {
+        "tool.started": "tool_call",
+        "tool.completed": "tool_result",
+    }
+
+    def bridge(kind: str, data: dict) -> None:
+        out_kind = mapping.get(kind)
+        if out_kind is None:
+            # text_delta / thinking_delta / thinking_done / stream.failed 直通
+            if kind in ("text_delta", "thinking_delta", "thinking_done", "stream.failed"):
+                out_kind = kind
+            else:
+                return
+        payload = dict(data)
+        mid = message_id_holder.get("id")
+        if mid:
+            payload.setdefault("message_id", mid)
+        # bridge 在引擎执行线程内被调用：SSE 故障绝不能中断对话
+        try:
+            _push_sse(out_kind, payload, session_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("sse bridge push failed: %s", out_kind, exc_info=True)
+
+    gw.install_sink(bridge)
 
 
 @router.post("/send")

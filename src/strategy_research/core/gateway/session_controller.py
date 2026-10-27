@@ -39,12 +39,16 @@ class SessionController:
         system: str | None = None,
         sink: EventSink | None = None,
         engine_factory: Callable[[], GraphEngine] | None = None,
+        registry: Any | None = None,
+        stream: bool = False,
     ) -> None:
         self._ep = entry_point
         self._client = client
         self._system = system
         self._sink = sink or (lambda kind, data: None)
-        self._engine_factory = engine_factory  # None = 默认单 llm 节点图
+        self._engine_factory = engine_factory  # None = 默认图（react 或 llm）
+        self._registry = registry
+        self._stream = stream
         self._turn_counters: dict[str, int] = {}  # session_id -> 已发 turn 数
 
     # ── 驱动 ─────────────────────────────────────────────
@@ -109,13 +113,38 @@ class SessionController:
         return RunResult(turn_id, run_id, ok=True, answer=answer)
 
     def _build_engine(self) -> GraphEngine:
-        """正式构造路径（不再 monkey-patch）。engine_factory 优先。"""
+        """正式构造路径（不再 monkey-patch）。engine_factory 优先。
+
+        P5-1b：有 registry 时用 react 节点（无工具调用时退化为单次 LLM 调用，
+        有工具时自动进入循环）；否则退化为纯 llm 节点。
+        """
         if self._engine_factory is not None:
             return self._engine_factory()
-        from strategy_research.core.runtimes.nodes.llm import make_llm_node
 
         engine = GraphEngine(sink=self._sink)
-        engine.add_node("llm", make_llm_node(self._client, system=self._system))
+        if self._registry is not None:
+            from strategy_research.core.runtimes.nodes.react import (
+                ReactConfig,
+                make_react_node,
+            )
+
+            engine.add_node(
+                "react",
+                make_react_node(
+                    self._client, self._registry, sink=self._sink,
+                    config=ReactConfig(system=self._system, stream=self._stream),
+                ),
+            )
+        else:
+            from strategy_research.core.runtimes.nodes.llm import make_llm_node
+
+            engine.add_node(
+                "llm",
+                make_llm_node(
+                    self._client, system=self._system,
+                    stream=self._stream, sink=self._sink,
+                ),
+            )
         return engine
 
 

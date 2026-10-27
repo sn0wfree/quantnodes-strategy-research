@@ -20,6 +20,8 @@ def get_gateway(
     client: Any | None = None,
     system: str | None = None,
     sink: Callable[[str, dict], None] | None = None,
+    registry: Any | None = None,
+    stream: bool = False,
 ) -> Any:
     """返回进程内唯一 Gateway（首次调用时构造并自检不变量）。
 
@@ -34,7 +36,21 @@ def get_gateway(
             from strategy_research.core.llm import LLMConfig, OpenAICompatClient
 
             client = OpenAICompatClient(LLMConfig.load())
-        gw = Gateway(client=client, system=system, sink=sink)
+        # P5-1b：默认装配内置工具链（shell 工具需显式 opt-in，见
+        # build_default_registry 的注释）。无 workspace 时用只读工具集。
+        if registry is None:
+            try:
+                from strategy_research.core.agent.builtin_tools import (
+                    build_default_registry,
+                )
+
+                registry = build_default_registry()
+            except Exception:  # noqa: BLE001 —— 工具链不可用则退化为纯 LLM
+                registry = None
+        gw = Gateway(
+            client=client, system=system, sink=sink,
+            registry=registry, stream=stream,
+        )
         gw.verify_invariants()  # A5：不变量违反即拒启
         _singleton["gw"] = gw
     return gw
