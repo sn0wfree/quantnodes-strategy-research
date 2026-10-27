@@ -1,5 +1,20 @@
 # S2 设计 — 库文件拆分（per-session 自包含 + 旧库只读兼容 + 惰性迁移）— 2026-10-27
 
+> ## ⚠️ 已作废（2026-10-27，同日实测后推翻）
+>
+> 实测：真实库 5.34 MB / 83 会话 = **66 KB/会话**；文档中的 2GB 重开线需要
+> **31,833 个会话**（每天 5 个 = 17.4 年，每天 20 个 = 4.4 年）。分库要解决的
+> 膨胀问题当前不存在。
+>
+> 另：`messages` / `message_parts` 的 `FOREIGN KEY (session_id) REFERENCES
+> sessions(id)` 在分库后无法满足（sessions 在全局库），必须镜像占位行或删除
+> FK；加上 Projector / EventStore 单路径需改按会话解析、container 重接线、
+> `_ensure_schema` 拆分，真实成本 5-7d（非规划的 3.2d）。
+>
+> **决定：分库推迟到出现实测需求（单文件 >500MB 或 >5000 会话）再做。**
+> S2a 代码已回退（`df40ca9e`）；本文档保留为决策记录。
+
+
 > 前置：S1 已完成（事件协议统一，PlatformStore 事件唯一写入者的存储基础就位）。
 > 依据：P-2 定案「每 session 一自包含 SQLite（event+blobs+message+goal/todo），
 > 全局小库（session 登记索引·goal/todo·config 指纹·迁移记录）」；数据面讨论稿
