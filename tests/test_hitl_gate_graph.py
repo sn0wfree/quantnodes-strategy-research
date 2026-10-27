@@ -244,6 +244,32 @@ def test_empty_hypothesis_passes_gate_through(tmp_path, monkeypatch):
     assert runner.study_store.created == []
 
 
+# ── 未知中断落点 ─────────────────────────────────────────
+
+
+def test_unknown_interrupt_becomes_abort_not_crash(tmp_path, monkeypatch):
+    """max_hops 等非审批中断 → abort dict 跳轮（runner 预算入账 + continue），
+    绝不落到 RoundOutcome 构造去 KeyError 崩轮。"""
+    import strategy_research.core.study.graph_preset as gp
+
+    _install_phase_fakes(monkeypatch)
+    runner = FakeRunner(hitl=True)
+
+    real_init = gp.GraphEngine.__init__
+
+    def init(self, *a, **k):
+        k["max_hops"] = 2  # 第 3 跳（gate 节点）触发 hops 守卫
+        real_init(self, *a, **k)
+
+    monkeypatch.setattr(gp.GraphEngine, "__init__", init)
+
+    result = run_phases_via_graph(make_ctx(tmp_path, runner))
+
+    assert result["aborted"] is True
+    assert result["reason"] == "interrupt_max_hops"
+    assert runner.study_store.created == []  # 不伪装成审批暂停、不落库
+
+
 # ── store：hitl 列迁移与往返 ─────────────────────────────
 
 

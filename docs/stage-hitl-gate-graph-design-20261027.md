@@ -57,8 +57,10 @@ researcher → novelty ──(dup)──→ END
 | runner 消费 | `_handle_hitl_pause`（runner.py:399-540，分支无关） | **不动，直接复用** |
 
 `_run_langgraph_branch` 对 paused dict 早退（`phase_engine.py:445-446`）；
-图路径在 `run_phases_via_graph` 里做同构早退：只认 `reason == "novelty_gate"`
-的 `__interrupt__`（`max_hops` 等其他中断不落库、不伪装成审批暂停）。
+图路径在 `run_phases_via_graph` 里做同构早退：`reason == "novelty_gate"`
+落库暂停；**其他中断（当前唯一来源 `max_hops`）转 abort dict**
+（`reason=interrupt_<原因>`，runner 预算入账 + continue 跳轮）——
+不落库、不伪装成审批暂停，也绝不落到 RoundOutcome 构造崩 KeyError。
 
 ## 4. 改动清单
 

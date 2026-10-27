@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from strategy_research.api.routers import study as study_router
+from strategy_research.api.routers import study_helpers
 
 
 @pytest.fixture
@@ -22,9 +22,10 @@ def _env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
     # Reset scheduler cache between tests so each gets a fresh instance.
-    study_router._scheduler_cache.clear()
+    # (3c 迁移后缓存搬到 study_helpers，按 db_path 键控)
+    study_helpers._scheduler_cache.clear()
     yield
-    study_router._scheduler_cache.clear()
+    study_helpers._scheduler_cache.clear()
 
 
 def test_lifespan_invokes_recover_on_startup(_env, monkeypatch):

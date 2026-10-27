@@ -81,11 +81,20 @@ def run_phases_via_graph(
     engine = build_research_engine(ctx, sink=sink)
     state = engine.run({})
 
-    # HITL 暂停早退（同 _run_langgraph_branch 对 paused 的早退）：
-    # 只认门节点的中断；max_hops 等其他中断不落库、不伪装成审批暂停。
+    # 中断早退（同 _run_langgraph_branch 对 paused/aborted 的早退）：
+    # novelty_gate → 审批暂停；其他中断（当前唯一来源 max_hops）→ abort
+    # 语义跳轮（runner 预算入账 + continue），绝不落到 RoundOutcome
+    # 构造去 KeyError 崩轮。
     interrupt = state.get(INTERRUPT_KEY)
-    if isinstance(interrupt, dict) and interrupt.get("reason") == "novelty_gate":
-        return _paused_result(ctx, interrupt.get("data") or {})
+    if isinstance(interrupt, dict):
+        if interrupt.get("reason") == "novelty_gate":
+            return _paused_result(ctx, interrupt.get("data") or {})
+        return {
+            "round": ctx.round_num,
+            "run_name": ctx.run_name,
+            "aborted": True,
+            "reason": f"interrupt_{interrupt.get('reason') or 'unknown'}",
+        }
 
     if state.get("novelty_ok") is False:
         return {

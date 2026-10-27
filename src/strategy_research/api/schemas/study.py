@@ -69,6 +69,7 @@ class StudyListItem(BaseModel):
     last_metrics: Optional[dict] = None
     last_error: Optional[str] = None
     engine: Optional[str] = None  # 'phases' | 'langgraph' ('dag' removed: no executor)
+    hitl: bool = False  # novelty 审批门开关（列表页可读）
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     completed_at: Optional[str] = None
