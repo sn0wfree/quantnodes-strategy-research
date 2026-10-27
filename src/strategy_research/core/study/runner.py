@@ -481,12 +481,23 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
             _run_dir.relative_to(_path) / "strategy.py"
         )
         self._round_start_clock = time.perf_counter()
-        resumed = await asyncio.to_thread(
-            self._resume_round_langgraph, _path, _strategy,
-            _current_state, _run_dir, _graph,
-            session=session, sid=sid, round_num=round_num,
-            directive_text=directive_text,
-        )
+        # Resume dispatch by the study's engine (fixed at creation):
+        # graph-path rounds rebuild from persisted artifacts + start=,
+        # langgraph rounds keep the checkpointer path until P5-2 retires it.
+        if getattr(self._get_study(), "engine", "phases") == "langgraph":
+            resumed = await asyncio.to_thread(
+                self._resume_round_langgraph, _path, _strategy,
+                _current_state, _run_dir, _graph,
+                session=session, sid=sid, round_num=round_num,
+                directive_text=directive_text,
+            )
+        else:
+            resumed = await asyncio.to_thread(
+                self._resume_round_via_graph, _path, _strategy,
+                _current_state, _run_dir, _graph,
+                session=session, sid=sid, round_num=round_num,
+                directive_text=directive_text,
+            )
         if resumed.get("paused_for_approval"):
             # The resume hit the gate again (typically: no
             # checkpointer → the fallback re-ran the round and
@@ -538,6 +549,63 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
                 and resumed.get("verdict", "discard") == "keep"
             )
         return resumed, "advance"
+
+    def _resume_round_via_graph(
+        self, path, strategy, current_state, run_dir, graph,
+        *, session: str, sid: str, round_num: int,
+        directive_text: str | None,
+    ) -> dict:
+        """方案 A resume：interrupt payload 重建 state + ``start=claims``。
+
+        不走 SqliteSaver（决策记录
+        docs/hitl-resume-industry-research-20261027.md）：暂停契约保证
+        payload 携带后继节点要读的每个键；researcher/novelty/gate 不重跑。
+        输出 dict 与旧 resume 同形（metrics/verdict/...；e2_passed/
+        passed_now 由 _handle_hitl_pause 的 H1 段补齐）。
+        """
+        from .graph_preset import resume_round_via_graph
+        from .phase_engine import BranchContext
+        from .state_store import study_root as _study_root
+
+        payload: dict = {}
+        interrupt = self.study_store.get_interrupt_for_round(sid, round_num)
+        raw = getattr(interrupt, "payload", None)
+        if raw:
+            try:
+                loaded = json.loads(raw)
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(
+                    "HITL resume: unreadable interrupt payload for "
+                    "study %s round %d; resuming with minimal state",
+                    sid, round_num,
+                )
+
+        study = self._get_study()
+        root = _study_root(path, sid)
+        ctx = BranchContext(
+            runner=self, study=study, round_num=round_num,
+            previous_summary=None, directive_text=directive_text,
+            path=path, strategy=strategy, current_state=current_state,
+            run_dir=run_dir, runs_dir=run_dir.parent,
+            run_name=run_dir.name, results_tsv=root / "results.tsv",
+            graph=graph, session=session, sid=sid,
+            metric_targets=study.metric_targets, guidance=None,
+        )
+        outcome = resume_round_via_graph(ctx, interrupt_payload=payload)
+        if isinstance(outcome, dict):
+            # resume 途中再中断/abort：交给 runner 循环的既有分支处理
+            return outcome
+        return {
+            "run_name": ctx.run_name,
+            "metrics": outcome.metrics,
+            "verdict": outcome.verdict,
+            "eval_result": outcome.eval_result,
+            "hypothesis": outcome.hypothesis,
+            "predicted_affected": outcome.predicted_affected,
+            "backtest_error": outcome.backtest_error,
+        }
 
     def _finalize_round(
         self,

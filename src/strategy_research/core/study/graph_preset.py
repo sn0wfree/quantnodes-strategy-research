@@ -104,6 +104,11 @@ def run_phases_via_graph(
             "reason": "novelty_rejected",
         }
 
+    return _outcome_from_state(ctx, state)
+
+
+def _outcome_from_state(ctx: BranchContext, state: dict) -> RoundOutcome:
+    """正常完成路径的共享尾部：state → RoundOutcome（两处调用同形）。"""
     researcher_output = state.get("researcher_output") or {}
     agent_outputs = {
         "researcher": researcher_output,
@@ -121,6 +126,51 @@ def run_phases_via_graph(
         captured_predictions=state.get("captured_predictions", {}),
         backtest_error=state.get("backtest_error"),
     )
+
+
+def resume_round_via_graph(
+    ctx: BranchContext,
+    *,
+    interrupt_payload: dict,
+    sink: EventSink | None = None,
+) -> RoundOutcome | dict:
+    """HITL approve 后从门后继（claims）续跑——方案 A（重建 + ``start=``）。
+
+    重建契约（hitl-resume-industry-research-20261027.md §5）：暂停点持久化
+    后继节点要读的每一个键。claims 只读 researcher_output / predicted_affected
+    （execution/evaluation 的输入由 claims/execution 依次产出），故重建
+    只需 payload 三键，researcher/novelty/gate 不重跑。审批决策由调用方
+    在图外施加（本函数只在 approve 路径被调），gate 保持节点单相位。
+    """
+    runner = ctx.runner
+    runner._emit(ctx.session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "graph_resume", "status": "started",
+        "decision": "approve",
+    })
+    engine = build_research_engine(ctx, sink=sink)
+    state = engine.run(
+        {
+            "researcher_output": interrupt_payload.get("researcher_output") or {},
+            "predicted_affected": interrupt_payload.get("predicted_affected") or [],
+            "hypothesis": interrupt_payload.get("hypothesis") or "",
+        },
+        start="claims",
+    )
+    runner._emit(ctx.session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "graph_resume", "status": "done",
+    })
+
+    interrupt = state.get(INTERRUPT_KEY)
+    if isinstance(interrupt, dict):
+        return {
+            "round": ctx.round_num,
+            "run_name": ctx.run_name,
+            "aborted": True,
+            "reason": f"interrupt_{interrupt.get('reason') or 'unknown'}",
+        }
+    return _outcome_from_state(ctx, state)
 
 
 # ── 节点工厂（闭包持 ctx；函数体延迟 import，与旧分支同源）──────
@@ -210,6 +260,11 @@ def _novelty_gate_node(ctx: BranchContext) -> Callable[[dict], dict]:
             "round_num": ctx.round_num,
             "hypothesis": hypothesis,
             "predicted_affected": state.get("predicted_affected", []),
+            # 暂停契约（hitl-resume-industry-research-20261027.md §5）：
+            # 后继 claims 节点读 researcher_output（存证要 predictions），
+            # 恢复时不得要求 researcher 重跑——暂停点持久化后继要读的
+            # 每一个键。
+            "researcher_output": state.get("researcher_output") or {},
             "message": f"Round {ctx.round_num}: 请审批 researcher 假设",
         })
 

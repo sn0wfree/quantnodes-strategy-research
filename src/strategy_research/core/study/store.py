@@ -1293,7 +1293,7 @@ class StudyStore:
                    payload, status, response, created_at, responded_at
             FROM study_interrupts
             WHERE study_id = ? AND round_num = ?
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, rowid DESC
             LIMIT 1
             """,
             (study_id, round_num),
