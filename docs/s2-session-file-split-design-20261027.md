@@ -51,17 +51,23 @@ migrated(session_id) -> bool                 # 台账查询
 
 ## 3. 分两步落地（每步独立可回退）
 
-### S2a（本轮）：入口拆分，行为零变化
+### S2a（本轮）：路由接线，行为零变化
 
-33 个调用点按 §1 表分类，拆成两个入口（均在 `web_session_db`，线程本地缓存共用）：
+引入路由组件 + 33 个调用点改道，但**路由内部仍全部返回旧库连接**——
+纯结构重构，全套测试必须原样绿。改道分类：
 
-- `_get_db()` —— 语义收窄为**全局连接**（sessions 表操作 + 鉴权），S2b 换
-  platform.sqlite；
-- `_session_db(session_id)` —— **新增**，会话级连接（messages 等表操作），
-  S2a 阶段与 `_get_db()` 返回同一旧库连接（零行为变化），S2b 换 per-session 文件。
+| 调用点类型 | 改为 | 数量（约） |
+|---|---|---|
+| sessions 表操作（列表/CRUD/鉴权/计数） | `global_conn()` | ~20 |
+| messages/message_parts/attempts/event_log 操作 | `session_conn(session_id)` | ~13 |
 
-`core/storage/session_files.py` 路由组件（惰性迁移/台账/路径）在 **S2b** 引入，
-接管两个入口的内部实现——避免 S2a 同时做「分类改道」和「新组件」两件事。
+判别方法：逐调用点看 SQL 触及的表（§1 表）。少数横跨的（如 service 先查 sessions
+再写 messages）拆成两次取连接。
+
+**同时**：`web_session_db` 的 `_ensure_schema` 拆为 `ensure_global_schema`（sessions
+表）与 `ensure_session_schema`（会话表 + FTS），路由分别调用；EventStore 的
+PlatformStore 兼容模式（S1 的 `db_path=`）在 S2a **保持不变**（仍指旧库）——
+S2b 才切 per-session 模式。
 
 ### S2b（下轮）：翻转路由内部
 

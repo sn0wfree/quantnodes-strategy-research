@@ -556,29 +556,8 @@ def _migrate_message_types(conn: sqlite3.Connection) -> None:
 _db_thread_local = threading.local()
 
 
-def _session_db(session_id: str) -> sqlite3.Connection:
-    """会话级连接（messages/message_parts/attempts/event_log/FTS 操作用）。
-
-    S2a（阶段 4 后续）：与 ``_get_db()`` 返回同一旧库连接（零行为变化）。
-    S2b 起改指 ``<workspace>/data/sessions/<session_id>.sqlite``（经
-    core/storage 路由：惰性迁移 + 台账）——届时全项目只有本函数知道
-    会话表的物理位置。
-    判别依据：docs/s2-session-file-split-design-20261027.md §1 表分类。
-
-    注意：与 ``_get_db()`` 共用线程本地缓存与 ``_get_db_path()`` 路径解析。
-    测试常通过 monkeypatch ``web_session._get_db_path`` 重定向库文件——
-    为了让补丁对调用方生效，``web_session`` 里的 ``_session_db`` 绑定会
-    在导入时解析到本函数，路径解析在每个调用点重新求值。
-    """
-    return _get_db()
-
-
 def _get_db() -> sqlite3.Connection:
     """Return the per-thread SQLite connection. Ensures schema is up to date.
-
-    S2a 语义收窄：本函数 = **全局连接**（sessions 表操作 + 归属鉴权 +
-    跨会话搜索）。会话级表的读写请用 ``_session_db(session_id)``——
-    S2b 拆库后两者指向不同文件。
 
     - One connection per worker thread (FastAPI serves requests on a
       thread pool): endpoints that used to open a fresh connection per
