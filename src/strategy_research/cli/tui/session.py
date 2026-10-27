@@ -345,8 +345,13 @@ class ChatSession:
             self.app.write_transcript(f"[入口拒绝: {receipt.reason}]")
             return
 
-        # 同步驱动（A2 的后台消费者会替换）；用 executor 避免阻塞 TUI loop
-        runs = await asyncio.get_running_loop().run_in_executor(None, gw.run_once)
+        # 同步驱动（A2 的后台消费者会替换）；用 executor 避免阻塞 TUI loop。
+        # kind 过滤：CLI 只领 CHAT 工单（AUTOMATION 归 scheduler 的消费者）。
+        from strategy_research.core.orchestration import WorkKind
+
+        runs = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: gw.run_once({WorkKind.CHAT}),
+        )
         run = runs[-1] if runs else None
         if run is None or not run.ok:
             self.app.write_transcript(

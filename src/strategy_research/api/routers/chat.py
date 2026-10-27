@@ -724,7 +724,13 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
         )
 
     # 同步驱动队列（A2 的后台消费者会替换这段）
-    runs = await asyncio.get_running_loop().run_in_executor(None, gw.run_once)
+    # kind 过滤：chat 只领 CHAT 工单——AUTOMATION 工单归 scheduler 的 mailbox
+    # 消费者（3c kind 归属，见 stage-3c 设计 §1）。
+    from strategy_research.core.orchestration import WorkKind
+
+    runs = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: gw.run_once({WorkKind.CHAT}),
+    )
     if not runs:
         raise HTTPException(status_code=504, detail="no run executed")
     run = runs[-1]

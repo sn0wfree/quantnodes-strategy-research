@@ -35,26 +35,28 @@ def new_entry_enabled() -> bool:
 
 
 def study_entry_enabled() -> bool:
-    """scheduler/study 入口的独立门（**默认关闭**）。
+    """scheduler/study 入口是否走统一入口（**阶段 3c 起默认开启**）。
 
-    与 new_entry_enabled 分开的原因：study 执行需要 research preset
-    （GraphEngine 跑阶段图），该能力属 B1。在 B1 之前切过去会让 study
-    无法真正执行——所以 scheduler 保持旧路径，直到 preset 就位。
-    启用方式：QNODES_NEW_ENTRY_STUDY=1（B1 完成后默认打开）。
+    B1-a/B1-b 交付后 study 已有阶段图执行能力，3c 完成提交级接线，
+    故翻默认为开。回退方式：QNODES_NEW_ENTRY_STUDY=0（旧 asyncio.Queue
+    路径保留到阶段 4 删除）。
     """
     value = os.environ.get("QNODES_NEW_ENTRY_STUDY", "").strip().lower()
-    return value in ("1", "true", "yes", "on")
+    if value in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def research_graph_enabled() -> bool:
-    """phases 引擎分支是否走 GraphEngine 阶段图（B1-b 灰度，**默认关闭**）。
+    """phases 引擎分支是否走 GraphEngine 阶段图（**阶段 3c 起默认开启**）。
 
-    这是「引擎路径」门，与两个入口门正交：入口门管「请求从哪进来」，
-    这个门管「phases 分支内部用旧函数序还是阶段图」。
-    启用方式：QNODES_RESEARCH_GRAPH=1（3c 验证后翻默认）。
+    这是「引擎路径」门，与两个入口门正交。B1-b 已用等价性测试钉死
+    （RoundOutcome 逐字段相等）；回退方式：QNODES_RESEARCH_GRAPH=0。
     """
     value = os.environ.get("QNODES_RESEARCH_GRAPH", "").strip().lower()
-    return value in ("1", "true", "yes", "on")
+    if value in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def api_chat_request(session_id: str, content: str) -> WorkRequest:

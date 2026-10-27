@@ -1,9 +1,9 @@
-"""阶段 3a：scheduler 灰度路径测试（flag 开 → 走统一入口）。
+"""scheduler 双路径测试（阶段 3a 引入，3c 门翻默认后更新）。
 
 验证点：
-- flag 开：submit 不落旧 per-session asyncio.Queue，而是进 Gateway mailbox
+- 门关（QNODES_NEW_ENTRY_STUDY=0）：走旧 per-session asyncio.Queue
+- 门开（默认）：进 Gateway mailbox，且被 scheduler 的 mailbox 消费者取走
 - 防重语义保留：重复 submit 仍被拒（active / queued / terminal 检查在上方）
-- flag 关：旧路径照旧（由既有 test_study_scheduler.py 覆盖）
 """
 from __future__ import annotations
 
@@ -21,10 +21,9 @@ def _isolate(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))
     monkeypatch.setenv("QUANTNODES_RESEARCH_HYPOTHESES_PATH", str(tmp_path / "hyp.json"))
     monkeypatch.setenv("SR_STUDY_MAX_CONCURRENT", "1")
-    # 默认关闭两个灰度门：每个测试显式设定，避免跨测试环境残留
+    # 3c 起两个门默认开；本文件显式设定，避免跨测试环境残留
     monkeypatch.delenv("QNODES_NEW_ENTRY", raising=False)
-    monkeypatch.delenv("QNODES_NEW_ENTRY_STUDY", raising=False)
-    # 清 Gateway 单例：模块级缓存的 mailbox 会跨测试残留队列
+    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "0")
     from strategy_research.core.gateway import reset_gateway
 
     reset_gateway()
@@ -51,14 +50,16 @@ def _record(study_id: str, session_id: str = "sess-1") -> StudyRecord:
 
 
 def test_flag_off_uses_legacy_queue(store, monkeypatch, capsys):
+    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "0")
     sched = StudyScheduler(store=store)
 
     async def run():
         ok = await sched.submit(_record("s1"))
-        return ok, dict(sched._session_queues)
+        queues = dict(sched._session_queues)
+        await sched.shutdown()
+        return ok, queues
 
     ok, queues = asyncio.run(run())
-    print("DIAG ok=", ok, "queues=", queues)
     assert ok is True, f"submit returned {ok}"
     assert "sess-1" in queues, f"queues={queues}"
 
@@ -69,6 +70,7 @@ def test_flag_on_routes_to_gateway(store, monkeypatch):
 
     async def run():
         ok = await sched.submit(_record("s2"))
+        await asyncio.sleep(0.05)  # 让 mailbox 消费者取走工单
         return ok
 
     ok = asyncio.run(run())
@@ -81,7 +83,8 @@ def test_flag_on_routes_to_gateway(store, monkeypatch):
     gw = _get_gateway_singleton()
     mailbox = gw.entry.mailbox_for("automation:sess-1")
     assert mailbox is not None
-    assert mailbox.peek_depth() == 1
+    # 3c：消费者立即取走（投递成功 ≠ 积压）；队列空 = 已被消费
+    assert mailbox.peek_depth() == 0
 
 
 def test_flag_on_duplicate_submit_rejected(store, monkeypatch):
@@ -93,6 +96,7 @@ def test_flag_on_duplicate_submit_rejected(store, monkeypatch):
     async def run():
         first = await sched.submit(rec)
         second = await sched.submit(rec)
+        await asyncio.sleep(0.05)
         return first, second
 
     first, second = asyncio.run(run())
@@ -102,7 +106,8 @@ def test_flag_on_duplicate_submit_rejected(store, monkeypatch):
     from strategy_research.core.study.scheduler import _get_gateway_singleton
 
     gw = _get_gateway_singleton()
-    assert gw.entry.mailbox_for("automation:sess-1").peek_depth() == 1
+    # 工单只有一条（第二次被拒），且已被消费者取走
+    assert gw.entry.mailbox_for("automation:sess-1").peek_depth() == 0
 
 
 def test_flag_on_terminal_study_rejected(store, monkeypatch):

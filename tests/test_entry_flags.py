@@ -1,11 +1,7 @@
-"""双门灰度测试 —— chat/CLI 默认开，study 默认关（B1 前）。
+"""双门灰度测试 —— chat/CLI 默认开；study 门 3c 起也默认开。
 
-阶段 3b 的关键设计：两个入口用**不同的**门。
-- new_entry_enabled(): chat/CLI，默认开（已验证）
-- study_entry_enabled(): scheduler/study，默认关（等 research preset / B1）
-
-原因：study 执行需要 GraphEngine 跑阶段图，而当前只有 llm 节点。
-切过去会让 study 无法真正执行——所以必须等 B1。
+阶段 3b 曾把 study 门默认关（resume preset 能力未就绪）；B1-a/B1-b 交付后
+阶段 3c 翻默认为开，撤销方式 = QNODES_NEW_ENTRY_STUDY=0（旧路径保留到阶段 4）。
 """
 from __future__ import annotations
 
@@ -28,17 +24,11 @@ def test_chat_entry_explicit_off(monkeypatch, value):
     assert new_entry_enabled() is False
 
 
-# ── study 门：默认关 ───────────────────────────────────
+# ── study 门：3c 起默认开 ──────────────────────────────
 
 
-def test_study_entry_off_by_default(monkeypatch):
+def test_study_entry_on_by_default(monkeypatch):
     monkeypatch.delenv("QNODES_NEW_ENTRY_STUDY", raising=False)
-    assert study_entry_enabled() is False
-
-
-@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", " On "])
-def test_study_entry_explicit_on(monkeypatch, value):
-    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", value)
     assert study_entry_enabled() is True
 
 
@@ -46,6 +36,12 @@ def test_study_entry_explicit_on(monkeypatch, value):
 def test_study_entry_explicit_off(monkeypatch, value):
     monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", value)
     assert study_entry_enabled() is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", " On "])
+def test_study_entry_explicit_on(monkeypatch, value):
+    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", value)
+    assert study_entry_enabled() is True
 
 
 # ── 两门独立 ───────────────────────────────────────────
@@ -56,12 +52,9 @@ def test_doors_are_independent(monkeypatch):
     monkeypatch.setenv("QNODES_NEW_ENTRY", "0")
     monkeypatch.delenv("QNODES_NEW_ENTRY_STUDY", raising=False)
     assert new_entry_enabled() is False
-    assert study_entry_enabled() is False
+    assert study_entry_enabled() is True  # 独立：study 门不受 chat 门影响
 
     monkeypatch.setenv("QNODES_NEW_ENTRY", "1")
-    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "1")
+    monkeypatch.setenv("QNODES_NEW_ENTRY_STUDY", "0")
     assert new_entry_enabled() is True
-    assert study_entry_enabled() is True
-
-    monkeypatch.setenv("QNODES_NEW_ENTRY", "0")
-    assert study_entry_enabled() is True  # study 门不受 chat 门影响
+    assert study_entry_enabled() is False

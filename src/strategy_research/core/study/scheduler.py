@@ -90,6 +90,8 @@ class StudyScheduler:
         # Per-session queue + consumer
         self._session_queues: dict[str, asyncio.Queue] = {}
         self._session_consumers: dict[str, asyncio.Task] = {}
+        # 3c: per-session mailbox consumers (AUTOMATION kind only)
+        self._mailbox_consumers: dict[str, asyncio.Task] = {}
         # v2: fire-and-forget dispatch tasks (session_loop → _run_one_study)
         self._dispatch_tasks: dict[str, asyncio.Task] = {}
         # v2: global concurrency semaphore (SR_STUDY_MAX_CONCURRENT)
@@ -157,14 +159,11 @@ class StudyScheduler:
             "objective": study.objective,
         })
 
-        # 阶段 3a 灰度：flag 打开时改走统一入口（WorkRequest → mailbox）。
-        # 上方防重检查（active / queued / terminal）保持不变——它们与
-        # 传输通道无关，属调度语义。
-        #
-        # 注意（阶段 3b）：scheduler 使用**独立的**门，不是全局 new_entry_enabled()。
-        # 原因：study 执行需要 research preset（GraphEngine 跑阶段图），
-        # 而该能力属 B1；在 B1 之前切到新路径会让 study 无法真正执行。
-        # study 入口迁移的时机 = B1 完成后。
+        # 阶段 3c：scheduler/study 入口迁移（默认开，QNODES_NEW_ENTRY_STUDY=0 回退）。
+        # 统一的是**准入通道**（唯一开 turn 路径 = admission）：工单进
+        # automation:{session} mailbox；执行体仍是 study runner（多轮长时异步，
+        # 与「一次 turn 一张图」的控制器模型不同构，见
+        # docs/stage-3c-scheduler-migration-design-20261027.md §2）。
         from strategy_research.core.gateway import study_entry_enabled
         if study_entry_enabled():
             from strategy_research.core.gateway import scheduler_request, submit_via_entry
@@ -186,6 +185,7 @@ class StudyScheduler:
                       sid, receipt.reason)
                 return False
             self._queued_study_ids.add(sid)
+            self._ensure_mailbox_consumer(study.session_id)
             _dlog("sched", "study=%s queued via Gateway (new entry)", sid)
             return True
 
@@ -723,6 +723,8 @@ class StudyScheduler:
             task.cancel()
         for _sid, task in list(self._session_consumers.items()):
             task.cancel()
+        for _sid, task in list(self._mailbox_consumers.items()):
+            task.cancel()
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()
             self._watchdog_task = None
@@ -731,6 +733,7 @@ class StudyScheduler:
         self._active_tasks.clear()
         self._dispatch_tasks.clear()
         self._session_consumers.clear()
+        self._mailbox_consumers.clear()
         self._queued_study_ids.clear()
 
     # ── internals ──────────────────────────────────────────────────
@@ -743,6 +746,49 @@ class StudyScheduler:
         task.add_done_callback(
             lambda t: self._session_consumers.pop(session_id, None)
         )
+
+    # ── 阶段 3c：AUTOMATION mailbox 消费者 ─────────────────────────
+
+    def _ensure_mailbox_consumer(self, session_id: str) -> None:
+        """懒启动 per-session mailbox 消费者（只领 AUTOMATION 工单）。
+
+        与 chat 的 ``gw.run_once()`` 分道：kind 过滤保证研究工单不会被聊天
+        消费路径当成聊天轮次执行（stage-3c 设计 §1）。
+        """
+        if session_id in self._mailbox_consumers:
+            return
+        task = asyncio.create_task(self._mailbox_loop(session_id))
+        self._mailbox_consumers[session_id] = task
+        task.add_done_callback(
+            lambda t: self._mailbox_consumers.pop(session_id, None)
+        )
+
+    async def _mailbox_loop(self, session_id: str) -> None:
+        """从 automation:{session} mailbox 取 AUTOMATION 工单并派发执行。
+
+        mailbox 空即退出（懒启动、不常驻空转）；下次 submit 再起。
+        执行体仍是 scheduler 的 ``_run_one_study``（见设计 §2）。
+        """
+        from strategy_research.core.orchestration import WorkKind
+
+        gw = _get_gateway_singleton()
+        mailbox = gw.entry.mailbox_for(f"automation:{session_id}")
+        while not self._shutdown and mailbox is not None:
+            request = mailbox.poll_due({WorkKind.AUTOMATION})
+            if request is None:
+                break
+            study_id = request.payload.get("study_id")
+            if not study_id:
+                _dlog("sched", "mailbox consumer: payload missing study_id")
+                continue
+            self._queued_study_ids.discard(study_id)
+            _dlog("sched", "mailbox consumer got study=%s", study_id)
+            task = asyncio.create_task(self._run_one_study(study_id))
+            self._dispatch_tasks[study_id] = task
+            task.add_done_callback(
+                lambda t, sid=study_id: self._dispatch_tasks.pop(sid, None)
+            )
+        logger.info("study mailbox consumer exit session=%s", session_id)
 
     async def _session_loop(self, session_id: str) -> None:
         """Drain the session's study queue, dispatching studies in parallel."""

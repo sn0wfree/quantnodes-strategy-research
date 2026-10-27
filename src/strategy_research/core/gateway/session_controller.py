@@ -49,12 +49,17 @@ class SessionController:
 
     # ── 驱动 ─────────────────────────────────────────────
 
-    def run_pending(self) -> list[RunResult]:
-        """清空所有 mailbox：逐 turn 准入 → 执行 → settle。"""
+    def run_pending(self, kinds: Any = None) -> list[RunResult]:
+        """清空 mailbox：逐 turn 准入 → 执行 → settle。
+
+        kinds：可选的 WorkKind 集合（只领自己负责的工单）。默认 None = 全部，
+        保留既有测试/脚本行为。不匹配的工单留在队列（例如 chat 消费者
+        不碰 AUTOMATION 工单）。
+        """
         results: list[RunResult] = []
         for session_key, mailbox in list(self._ep.iter_mailboxes()):
             while True:
-                request = mailbox.poll_due()
+                request = mailbox.poll_due(kinds)
                 if request is None:
                     break
                 results.append(self._execute(request))

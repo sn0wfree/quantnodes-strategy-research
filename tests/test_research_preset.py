@@ -257,21 +257,21 @@ def test_novelty_dup_routes_to_end_before_claims(tmp_path, monkeypatch):
 # ── 灰度门 ───────────────────────────────────────────────
 
 
-def test_branch_flag_default_off(monkeypatch):
+def test_branch_flag_default_on_after_3c(monkeypatch):
     monkeypatch.delenv("QNODES_RESEARCH_GRAPH", raising=False)
-    assert _resolve_branch_fn("phases") is _run_phases_branch
-
-
-def test_branch_flag_on_switches_to_graph(monkeypatch):
-    monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "1")
     assert _resolve_branch_fn("phases") is run_phases_via_graph
+
+
+def test_branch_flag_can_rollback(monkeypatch):
+    monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "0")
+    assert _resolve_branch_fn("phases") is _run_phases_branch
 
 
 def test_branch_flag_unknown_engine_fallback(monkeypatch):
     """脏 engine 值回退 phases；门开时回退到的是图形态（同一 phases 语义）。"""
     monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "1")
     assert _resolve_branch_fn("not_a_real_engine") is run_phases_via_graph
-    monkeypatch.delenv("QNODES_RESEARCH_GRAPH")
+    monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "0")
     assert _resolve_branch_fn("not_a_real_engine") is _run_phases_branch
 
 

@@ -132,17 +132,27 @@ class Mailbox:
 
     # ── 消费者接口（A2 SessionController 使用；E1 由测试驱动） ──
 
-    def poll_due(self) -> WorkRequest | None:
-        """取下一个可执行工单：interrupt 优先，其后 FIFO；过期项在此惰性出清。"""
+    def poll_due(self, kinds: Iterable[WorkKind] | None = None) -> WorkRequest | None:
+        """取下一个可执行工单：interrupt 优先，其后 FIFO；过期项在此惰性出清。
+
+        kinds：可选的 kind 过滤（消费者只领自己负责的工单）。不匹配的工单
+        **留在队列**，不丢弃；interrupt 优先级在过滤后的集合内生效。
+        """
         self.expire_due()
         if not self._queue:
             return None
-        item = self._pop_next()
-        return item.request
+        if kinds is None:
+            return self._pop_next().request
+        allowed = {k if isinstance(k, WorkKind) else WorkKind(k) for k in kinds}
+        item = self._pop_next_where(lambda it: it.request.kind in allowed)
+        return item.request if item is not None else None
 
-    def peek_depth(self) -> int:
+    def peek_depth(self, kinds: Iterable[WorkKind] | None = None) -> int:
         self.expire_due()
-        return len(self._queue)
+        if kinds is None:
+            return len(self._queue)
+        allowed = {k if isinstance(k, WorkKind) else WorkKind(k) for k in kinds}
+        return sum(1 for it in self._queue if it.request.kind in allowed)
 
     def snapshot(self) -> Iterable[QueueItem]:
         """只读快照（status/fold 用）；返回前先出清过期。"""
@@ -218,9 +228,19 @@ class Mailbox:
 
     def _pop_next(self) -> QueueItem:
         """interrupt 优先，其后 FIFO。"""
+        return self._pop_next_where(lambda item: True)  # type: ignore[return-value]
+
+    def _pop_next_where(self, predicate: Callable[[QueueItem], bool]) -> QueueItem | None:
+        """在满足 predicate 的项中取：interrupt 优先，其后 FIFO。
+
+        不满足 predicate 的项原位保留（kind 过滤消费用完即还）。
+        """
         for idx, item in enumerate(self._queue):
-            if item.interrupt and not item.is_summary:
+            if item.interrupt and not item.is_summary and predicate(item):
                 del self._queue[idx]
                 return item
-        item = self._queue.popleft()
-        return item
+        for idx, item in enumerate(self._queue):
+            if predicate(item):
+                del self._queue[idx]
+                return item
+        return None

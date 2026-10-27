@@ -70,9 +70,13 @@ class Gateway:
 
     # ── 驱动 ─────────────────────────────────────────────
 
-    def run_once(self) -> list[RunResult]:
-        """处理当前所有排队工单（同步）。A2 换成常驻消费者。"""
-        return self.controller.run_pending()
+    def run_once(self, kinds: Any = None) -> list[RunResult]:
+        """处理当前排队的工单（同步）。A2 换成常驻消费者。
+
+        kinds：可选 WorkKind 集合——chat 只领 CHAT、study 消费者只领
+        AUTOMATION（3c kind 归属），默认 None = 全部。
+        """
+        return self.controller.run_pending(kinds)
 
     # ── 观测 ─────────────────────────────────────────────
 
