@@ -7,7 +7,11 @@ from __future__ import annotations
 import pytest
 
 from strategy_research.core.agent.strategy.budget import BudgetLimits
-from strategy_research.core.runtimes.graph_engine import GraphEngine
+from strategy_research.core.runtimes.graph_engine import (
+    GraphEngine,
+    GraphInterrupt,
+    INTERRUPT_KEY,
+)
 from strategy_research.core.runtimes.run_budget import RunBudget
 
 
@@ -197,3 +201,129 @@ def test_slice_exhaustion_stops_branch_not_parent():
     assert out["joined"] is True
     assert parent.usage.tokens == 3
     assert not parent.exhausted  # 切片耗尽不传染父
+
+
+# ── 补充：维度数学与边界 ─────────────────────────────────
+
+
+def test_reserve_cost_dimension():
+    b = parent_budget(max_cost_usd=0.30)
+    slices = b.reserve(3)
+    for s in slices:
+        assert abs(s.limits.max_cost_usd - 0.1) < 1e-9
+
+
+def test_reserve_time_dimension():
+    slices = parent_budget(max_seconds=9.0).reserve(3)
+    for s in slices:
+        # reserve 前有微秒级流逝（started_at 到调用点的间隔），放宽容差
+        assert 2.99 < s.limits.max_seconds <= 3.0
+
+
+def test_reserve_single_slice_gets_full_remaining():
+    b = parent_budget(max_tokens=10)
+    b.record({"total_tokens": 4})
+    (s,) = b.reserve(1)
+    assert s.limits.max_tokens == 6 and not s.exhausted
+
+
+def test_absorb_no_children_is_noop():
+    b = parent_budget(max_tokens=10)
+    b.absorb()
+    assert b.usage.tokens == 0
+
+
+def test_exhaustion_reason_idempotent():
+    b = parent_budget(max_tokens=5)
+    b.record({"total_tokens": 5})
+    first = b.plan_call()
+    second = b.plan_call()
+    assert first == second == (False, "budget:tokens")  # 老路径行为不变
+
+
+def test_parent_exhausts_naturally_after_absorb():
+    b = parent_budget(max_tokens=10)
+    (s,) = b.reserve(1)
+    s.record({"total_tokens": 10})  # 切片内合法用满
+    b.absorb(s)
+    assert b.plan_call() == (False, "budget:tokens")  # 父按自身限额自然判定
+
+
+def test_plan_call_refuses_repeatedly_after_short_circuit():
+    b = parent_budget(max_tokens=1)
+    b.record({"total_tokens": 1})
+    b.plan_call()
+    assert b.exhausted
+    assert b.plan_call() == (False, "budget:tokens")  # 短路后 reason 不丢
+
+
+# ── 补充：fanout × 预算交互 ──────────────────────────────
+
+
+def test_cancelled_branches_consume_nothing():
+    def one_token(payload, branch_state):
+        budget = branch_state["branch"]["budget"]
+        budget.plan_call()
+        budget.record({"total_tokens": 1})
+        if payload == 1:
+            raise GraphInterrupt("stop")
+        return {}
+
+    engine = GraphEngine()
+    engine.add_node("split", lambda s: {**s, "branches": [1, 2, 3]})
+    engine.add_node("join", lambda s: s)
+    engine.add_fanout("split", one_token, "join", max_parallel=1)
+
+    parent = parent_budget(max_tokens=100)
+    engine.run({"run_budget": parent})
+    assert parent.usage.tokens == 1  # 被取消的分支从未消费
+
+
+def test_settle_happens_even_when_interrupted():
+    """中断路径同样归还：已跑分支的消耗进父账（absorb 先于中断返回）。"""
+
+    def worker(payload, branch_state):
+        budget = branch_state["branch"]["budget"]
+        budget.record({"total_tokens": 2})
+        if payload == 1:
+            raise GraphInterrupt("stop")
+        return {}
+
+    engine = GraphEngine()
+    engine.add_node("split", lambda s: {**s, "branches": [1, 2]})
+    engine.add_node("join", lambda s: s)
+    engine.add_fanout("split", worker, "join", max_parallel=1)
+
+    parent = parent_budget(max_tokens=100)
+    out = engine.run({"run_budget": parent})
+    assert out[INTERRUPT_KEY]["reason"] == "stop"
+    assert parent.usage.tokens == 2
+
+
+def test_branch_worker_plugs_real_llm_node_with_slice():
+    """切片直接喂 make_llm_node：INV-9 路径在并行分支里原样成立。"""
+    from strategy_research.core.runtimes import make_llm_node
+
+    class FakeResp:
+        content = "hi"
+        usage = {"total_tokens": 2, "prompt_tokens": 1, "completion_tokens": 1}
+
+    class FakeClient:
+        def chat(self, messages, **kwargs):
+            return FakeResp()
+
+    def worker(payload, branch_state):
+        node = make_llm_node(FakeClient(), budget=branch_state["branch"]["budget"])
+        result = node({"messages": [{"role": "user", "content": str(payload)}]})
+        return {"answer": result["answer"], "tokens": result["budget"]["total_tokens"]}
+
+    engine = GraphEngine()
+    engine.add_node("split", lambda s: {**s, "branches": ["q1", "q2", "q3"]})
+    engine.add_node("join", lambda s: {**s, "joined": True})
+    engine.add_fanout("split", worker, "join")
+
+    parent = parent_budget(max_tokens=9)
+    out = engine.run({"run_budget": parent})
+
+    assert all(r["result"] == {"answer": "hi", "tokens": 2} for r in out["fanout_results"])
+    assert parent.usage.tokens == 6  # 3 支 × 2 tokens，settle 回父
