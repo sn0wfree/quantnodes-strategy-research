@@ -200,11 +200,34 @@ class ExecutorBridge:
         for p in self._workers:
             if p.is_alive():
                 p.terminate()
+                # terminate 后必须 join：否则 is_alive() 可能仍报 True，
+                # ensure_alive() 会误判池健康而不重建，后续 job 永无人消费。
+                p.join(timeout=1.0)
+
+    def discard_pending(self) -> None:
+        """放弃全部在飞结果（连坐后使用）：清在飞计数 + 清空结果/事件队列。
+
+        连坐后剩余 job 的结果无人认领；不清理会让后续 cancel 误判
+        「仍有任务在飞」而白等硬杀超时，也会让下一次 collect 取到陈旧结果。
+        worker 进程保留，下次 dispatch 前 ensure_alive() 决定是否重建。
+        """
+        self._in_flight = 0
+        for q in (self._result_q, self._events_q):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
 
     # ── 存活自愈 ──────────────────────────────────────────
 
     def ensure_alive(self) -> None:
-        """池被硬杀（worker 全死）后重建，保证后续 run 仍可用。"""
+        """池被硬杀（worker 全死）后重建，保证后续 run 仍可用。
+
+        重建必须**换新队列**：硬杀时未出队的 job 还留在 dispatch 队列里，
+        新 worker 会先领到那些陈旧 job（例如一个 sleep 30s 的任务），
+        导致后续 job 长期饥饿。旧队列随旧进程一起丢弃。
+        """
         if not self._started:
             self.start()
             return
@@ -213,9 +236,19 @@ class ExecutorBridge:
             for p in self._workers:
                 if p.is_alive():
                     p.terminate()
+                    p.join(timeout=1.0)
             self._workers.clear()
             self._started = False
+            self._reset_queues()
             self.start()
+
+    def _reset_queues(self) -> None:
+        """重建队列（陈旧 job/结果不跨池代际）。"""
+        self._dispatch_q = self._ctx.Queue()
+        self._result_q = self._ctx.Queue()
+        self._events_q = self._ctx.Queue()
+        self._cancel_evt = self._ctx.Event()
+        self._in_flight = 0
 
     # ── 事件 ─────────────────────────────────────────────
 

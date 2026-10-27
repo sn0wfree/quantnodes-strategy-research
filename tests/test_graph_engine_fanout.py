@@ -248,7 +248,7 @@ def test_add_fanout_validation_errors():
         engine.add_fanout("split", double_worker, "ghost")
     with pytest.raises(ValueError, match="同一节点"):
         engine.add_fanout("split", double_worker, "split")
-    with pytest.raises(ValueError, match="t2.*F4"):
+    with pytest.raises(ValueError, match="t2.*需要 executor"):
         engine.add_fanout("split", double_worker, "join", mode="t2")
     with pytest.raises(ValueError, match="max_parallel"):
         engine.add_fanout("split", double_worker, "join", max_parallel=0)

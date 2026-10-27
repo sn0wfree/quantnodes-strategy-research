@@ -64,7 +64,7 @@ study 门在 **B1 完成后**翻默认开。
 | ✅ F1 | **fanout 复合节点**（多 subagent 并行，两档失败 + 连坐取消；D1-D5 已拍板） | B1-a | 2d | 15 测试：并行/隔离/中断连坐/并发上限；设计见 `stage-f1-fanout-design-20261027.md` |
 | ✅ F2 | 预算预留树（reserve/absorb）+ PlatformStore 写线程锁 | F1 | 1d | 均分/零剩余预标/settle 归还 14 测试 + 8 线程并发 emit 全落库；设计见 `stage-f2-budget-tree-design-20261027.md` |
 | ✅ F3 | fanout preset v1（react 子代理 + 失败策略 + steer 承载 + 事件回流） | F2 | 1.5d | 19 单测 + 2 live（真 LLM 三子代理并行）；**修 react 忽略注入预算的真缺陷**；设计见 `stage-f3-fanout-preset-design-20261027.md` |
-| **F4** | fanout mode="t2"：executor 池分支 + 取消 5s 硬杀 | F1 | 1.5d | 10 回测并行、取消硬杀生效 |
+| ✅ F4 | fanout mode="t2"：executor 池分支 + 取消 5s 硬杀 + 跨进程预算结算 | F1 | 1.5d | 12 测试：子进程执行/中断连坐/硬杀后池自愈；设计见 `stage-f4-fanout-t2-design-20261027.md` |
 | **3c** | **scheduler / automation 入口迁移** | B1-b | 1d | study 门 + research_graph 门翻默认开 |
 | **4** | 清理（ContextHub + 调度归一 + 反向依赖 + 测试隔离 + 门禁） | 3c | 7d | 净删 2000+ 行；审计门② |
 
@@ -99,7 +99,7 @@ study 门在 **B1 完成后**翻默认开。
 5. [x] F1：fanout 复合节点（`stage-f1-fanout-design-20261027.md`；D1-D5 已拍板）
 6. [x] F2：预算预留树 + Store 写锁（`stage-f2-budget-tree-design-20261027.md`）
 7. [x] F3：fanout preset v1（`stage-f3-fanout-preset-design-20261027.md`；含 react 预算注入修复）
-8. [ ] F4：fanout t2（executor 池）
+8. [x] F4：fanout t2（`stage-f4-fanout-t2-design-20261027.md`；含 bridge 硬杀后队列复用真 bug 修复）
 9. [ ] 3c：scheduler 迁移（study 门 + research_graph 门翻默认开）
 
 ## 8. 附：本次失败的可复用教训

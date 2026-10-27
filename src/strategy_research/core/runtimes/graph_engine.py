@@ -45,12 +45,50 @@ _MAX_HOPS_BACKSTOP = 5
 
 @dataclass(frozen=True)
 class _FanoutSpec:
-    """fanout 复合节点声明（挂在拆分节点上）。详见 stage-f1-fanout-design。"""
+    """fanout 复合节点声明（挂在拆分节点上）。详见 stage-f1/f4 设计。"""
 
     worker: WorkerFn
     join: str
     mode: str
     max_parallel: int
+    executor: Any = None
+    cancel_timeout: float = 5.0
+
+
+def _t2_branch_entry(worker: WorkerFn, payload: Any, ctx: dict) -> dict:
+    """T2 子进程入口（必须是模块级函数——spawn 池要可导入）。
+
+    budget 对象不跨进程：按 ctx 里的 limits 在子进程重建本地 RunBudget；
+    中断转成可 pickle 标记；消耗以 _budget_usage 回传（主进程记回切片）。
+    """
+    from .run_budget import RunBudget
+
+    budget = None
+    limits = ctx.get("budget_limits")
+    if limits is not None:
+        budget = RunBudget(limits=limits)
+    branch_state = {
+        **ctx.get("parent_state", {}),
+        "branch": {
+            "id": ctx.get("branch_id"),
+            "ordinal": ctx.get("ordinal"),
+            "payload": payload,
+            "budget": budget,
+        },
+    }
+    try:
+        result = worker(payload, branch_state)
+    except GraphInterrupt as gi:
+        return {"__interrupt__branch__": {"reason": gi.reason, "data": gi.data}}
+    out = {"result": result}
+    if budget is not None:
+        out["_budget_usage"] = {
+            "tokens": budget.usage.tokens,
+            "prompt_tokens": budget.usage.prompt_tokens,
+            "completion_tokens": budget.usage.completion_tokens,
+            "cost_usd": budget.usage.cost_usd,
+        }
+    return out
 
 
 class GraphInterrupt(Exception):
@@ -131,18 +169,25 @@ class GraphEngine:
         *,
         mode: str = "t1",
         max_parallel: int = 8,
+        executor: Any = None,
+        cancel_timeout: float = 5.0,
     ) -> "GraphEngine":
-        """fanout 复合节点（多 subagent 并行，F1）。
+        """fanout 复合节点（多 subagent 并行，F1/F4）。
 
         拆分节点 fn 返回 {"branches": [载荷, ...]}；每条分支在
-        ``{**父state快照, "branch": {id, ordinal, payload}}`` 上跑 worker，
-        返回值不并入父 state（账本隔离）。join 节点从
+        ``{**父state快照, "branch": {id, ordinal, payload, budget}}`` 上跑
+        worker，返回值不并入父 state（账本隔离）。join 节点从
         ``state["fanout_results"]`` 读全貌并负责合并。
+
+        mode="t1"：进程内线程池（默认）。取消协作粒度 = 整个 worker
+        （Python 无法硬杀线程）。
+        mode="t2"：派发到 ExecutorBridge 进程池（worker 必须模块级可导入；
+        需要传 ``executor=bridge``）。取消协作优先、``cancel_timeout`` 秒升级
+        硬杀（terminate），连坐后 discard_pending 防陈旧结果。
 
         失败两档：分支普通异常 → 记 error、其余照跑、汇合照常；
         分支抛 GraphInterrupt → 连坐（未起跑分支记 cancelled）、汇合不执行、
-        state 带 ``__interrupt__``。T1 分支跑在线程里，取消协作粒度 =
-        整个 worker（Python 无法硬杀线程），如实见 stage-f1-fanout-design §3。
+        state 带 ``__interrupt__``。
         """
         self._require_node(source, "add_fanout source")
         self._require_node(join, "add_fanout join")
@@ -150,14 +195,19 @@ class GraphEngine:
             raise ValueError("add_fanout: join 不能与 source 是同一节点")
         if source in self._fanouts:
             raise ValueError(f"add_fanout: 节点 {source!r} 已声明 fanout")
-        if mode != "t1":
-            raise ValueError("add_fanout: mode='t2' 属 F4（executor 池接线），尚未支持")
+        if mode not in ("t1", "t2"):
+            raise ValueError(f"add_fanout: mode 必须是 't1' 或 't2'，收到 {mode!r}")
+        if mode == "t2" and executor is None:
+            raise ValueError("add_fanout: mode='t2' 需要 executor=ExecutorBridge 实例")
+        if mode == "t1" and executor is not None:
+            raise ValueError("add_fanout: executor 只用于 mode='t2'")
         if max_parallel < 1:
             raise ValueError("add_fanout: max_parallel 至少为 1")
         if not callable(worker):
             raise TypeError("add_fanout: worker 必须可调用")
         self._fanouts[source] = _FanoutSpec(
             worker=worker, join=join, mode=mode, max_parallel=max_parallel,
+            executor=executor, cancel_timeout=cancel_timeout,
         )
         # 声明即覆盖：拆分节点的出边强制指向汇合节点。
         self._out[source] = ("edge", join)
@@ -241,7 +291,10 @@ class GraphEngine:
             try:
                 updated = fn(dict(state))
                 if spec is not None and INTERRUPT_KEY not in updated:
-                    updated = self._run_fanout(name, spec, updated)
+                    runner = (
+                        self._run_fanout_t2 if spec.mode == "t2" else self._run_fanout
+                    )
+                    updated = runner(name, spec, updated)
             except GraphInterrupt as gi:
                 data: dict[str, Any] = {"node": name, "reason": gi.reason}
                 if gi.data is not None:
@@ -358,3 +411,152 @@ class GraphEngine:
             self._sink("graph.interrupted", data)
             out[INTERRUPT_KEY] = data
         return out
+
+    def _run_fanout_t2(self, node_name: str, spec: _FanoutSpec, state: dict) -> dict:
+        """T2 形态：分支派发到 ExecutorBridge 进程池（F4）。
+
+        与 t1 语义对齐：业务失败不连坐；GraphInterrupt 连坐（取消未完成
+        job、join 不执行）。区别是取消有 5s 硬杀档位，且 worker 必须
+        模块级可导入（pickle 预检给出可操作报错）。
+        """
+        from .executor_bridge import JobSpec
+
+        branches = state.get("branches")
+        if not isinstance(branches, list):
+            raise ValueError(
+                f"fanout 拆分节点 {node_name!r} 的 fn 必须返回 {{'branches': list}}"
+            )
+        parent_run = state.get("run_id")
+        self._sink("graph.fanout", {
+            "node": node_name,
+            "branches": len(branches),
+            "max_parallel": spec.max_parallel,
+            "mode": "t2",
+        })
+        bridge = spec.executor
+        bridge.ensure_alive()
+        parent_budget = state.get("run_budget")
+        slices: list[RunBudget] | None = None
+        if isinstance(parent_budget, RunBudget) and branches:
+            slices = parent_budget.reserve(len(branches))
+
+        entries: dict[int, dict] = {}
+        interrupted_entry: dict | None = None
+        for ordinal, payload in enumerate(branches, start=1):
+            branch_id = f"{parent_run}:{ordinal}" if parent_run else f"{node_name}:b{ordinal}"
+            entry: dict[str, Any] = {
+                "ordinal": ordinal, "branch_id": branch_id, "payload": payload,
+                "result": None, "error": None, "seconds": 0.0,
+            }
+            slice_ = slices[ordinal - 1] if slices else None
+            if interrupted_entry is not None:
+                # 已连坐：后续分支一律记 cancelled（保持 ordinal 全覆盖）
+                entry["status"] = "cancelled"
+                entries[ordinal] = entry
+                continue
+            # 父侧预检饥饿切片（剩余 0）：直接连坐，不派发
+            if slice_ is not None:
+                allowed, reason = slice_.plan_call()
+                if not allowed:
+                    entry["status"] = "interrupted"
+                    entry["error"] = "branch_budget_exhausted"
+                    entry["reason"] = reason
+                    interrupted_entry = entry
+                    entries[ordinal] = entry
+                    continue
+            ctx = {
+                "parent_state": {k: v for k, v in state.items()
+                                 if k not in ("run_budget", "branches")},
+                "branch_id": branch_id,
+                "ordinal": ordinal,
+                "budget_limits": slice_.limits if slice_ else None,
+            }
+            bridge.dispatch(JobSpec(
+                job_id=branch_id,
+                fn=_t2_branch_entry,
+                args=(spec.worker, payload, ctx),
+                timeout=spec.cancel_timeout * 12,  # 单 job 宽限
+            ))
+            entries[ordinal] = entry
+
+        # ── 收结果（业务失败不连坐；中断连坐）──
+        pending = [o for o, e in entries.items() if "status" not in e]
+        for _ in pending:
+            if interrupted_entry is not None:
+                break
+            job_result = bridge.collect(timeout=spec.cancel_timeout * 12)
+            entry = entries.get(_ordinal_of(job_result.job_id, entries))
+            if entry is None:
+                # collect 超时（job_id="?"）或未知结果：剩余在飞分支不再逐个等，
+                # 统一记 error（诚实：结果未取回，不能当成功）。
+                for other in entries.values():
+                    if "status" not in other:
+                        other["status"] = "error"
+                        other["error"] = job_result.error or "collect timeout"
+                break
+            entry["seconds"] = round(job_result.seconds, 4)
+            if not job_result.ok:
+                if "cancelled" in str(job_result.error or ""):
+                    entry["status"] = "cancelled"
+                else:
+                    entry["status"] = "error"
+                    entry["error"] = job_result.error
+                continue
+            value = job_result.value if isinstance(job_result.value, dict) else {}
+            if "__interrupt__branch__" in value:
+                marker = value["__interrupt__branch__"] or {}
+                entry["status"] = "interrupted"
+                entry["error"] = marker.get("reason") or "branch_interrupt"
+                interrupted_entry = entry
+                continue
+            entry["status"] = "ok"
+            entry["result"] = value.get("result")
+            self._credit_slice(
+                slices[entry["ordinal"] - 1] if slices else None, value,
+            )
+
+        if interrupted_entry is not None:
+            # 连坐：协作取消 → 超时硬杀；放弃在飞结果（不再等了）
+            bridge.cancel(hard_timeout=spec.cancel_timeout)
+            bridge.discard_pending()
+        for entry in entries.values():
+            entry.setdefault("status", "cancelled")  # 兜底：绝不留空状态
+        results = [entries[i + 1] for i in range(len(branches))]
+
+        for entry in results:
+            self._sink("branch.settled", {
+                "node": node_name, "branch_id": entry["branch_id"],
+                "ordinal": entry["ordinal"], "status": entry["status"],
+                "seconds": entry["seconds"],
+            })
+        if slices:
+            parent_budget.absorb(*slices)
+        out = {**state, "fanout_results": results}
+        if interrupted_entry is not None:
+            data: dict[str, Any] = {
+                "node": node_name,
+                "reason": interrupted_entry["error"] or "branch_interrupt",
+                "data": {"branch_id": interrupted_entry["branch_id"]},
+            }
+            self._sink("graph.interrupted", data)
+            out[INTERRUPT_KEY] = data
+        bridge.drain_events()
+        return out
+
+    def _credit_slice(self, slice_: RunBudget | None, value: dict) -> None:
+        """T2 子进程回传的 token/成本消耗记账到父切片（跨进程结算）。"""
+        usage = value.get("_budget_usage")
+        if not isinstance(usage, dict) or slice_ is None:
+            return
+        slice_.usage.tokens += int(usage.get("tokens", 0) or 0)
+        slice_.usage.prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+        slice_.usage.completion_tokens += int(usage.get("completion_tokens", 0) or 0)
+        slice_.usage.cost_usd += float(usage.get("cost_usd", 0.0) or 0.0)
+
+
+def _ordinal_of(job_id: str, entries: dict[int, dict]) -> int:
+    """从 job_id（branch_id）反查 ordinal。"""
+    for ordinal, entry in entries.items():
+        if entry["branch_id"] == job_id:
+            return ordinal
+    return -1
