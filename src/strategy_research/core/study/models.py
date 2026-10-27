@@ -170,6 +170,9 @@ class StudyRecord:
     workspace_path: str
     strategy_name: str
     engine: str = 'phases'  # 'phases' | 'langgraph' ('dag' removed: no executor)
+    # HITL novelty 审批门：True = novelty 之后、回测之前暂停等人工审批。
+    # 引擎无关（phases/langgraph 都认）；关门 = 现行行为不变。
+    hitl: bool = False
     # 创建者 chat 会话 — 归属查询（get_active_study/list_studies）与 IDOR
     # 校验（_verify_study_ownership）用途；旧数据回填=session_id。
     owner_session_id: str | None = None

@@ -118,6 +118,7 @@ class StudyStore:
                     objective               TEXT NOT NULL,
                     executor_type           TEXT NOT NULL DEFAULT 'autoresearch',
                     engine                  TEXT NOT NULL DEFAULT 'phases',
+                    hitl                    INTEGER NOT NULL DEFAULT 0,
                     workspace_path          TEXT NOT NULL,
                     strategy_name           TEXT NOT NULL,
                     metric_targets          TEXT,
@@ -333,6 +334,11 @@ class StudyStore:
                 self._conn.execute(
                     "ALTER TABLE studies ADD COLUMN engine TEXT NOT NULL DEFAULT 'phases'"
                 )
+            # v5 migration: hitl flag (novelty approval gate, engine-agnostic)
+            if "hitl" not in study_cols:
+                self._conn.execute(
+                    "ALTER TABLE studies ADD COLUMN hitl INTEGER NOT NULL DEFAULT 0"
+                )
             # v4: loop_config_json for parameter evolution
             if "loop_config_json" not in study_cols:
                 self._conn.execute(
@@ -396,6 +402,7 @@ class StudyStore:
         strategy_name: str,
         executor_type: str = "autoresearch",
         engine: str = "phases",
+        hitl: bool = False,
         metric_targets: list[dict] | None = None,
         budget_token: int | None = None,
         budget_turn: int | None = None,
@@ -470,7 +477,7 @@ class StudyStore:
                 """
                 INSERT INTO studies (
                     study_id, session_id, owner_session_id, goal_id, objective,
-                    executor_type, engine, workspace_path, strategy_name,
+                    executor_type, engine, hitl, workspace_path, strategy_name,
                     metric_targets,
                     budget_token, budget_turn, budget_time_seconds,
                     cooldown_base, cooldown_jitter, min_cooldown,
@@ -481,11 +488,11 @@ class StudyStore:
                     monitor_interval_seconds, last_monitor_check_at,
                     monitor_drift_count, loop_config_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, NULL, 0, ?)
                 """,
                 (
                     study_id, study_id, owner, goal_id, objective,
-                    executor_type, engine, workspace_path, strategy_name,
+                    executor_type, engine, int(hitl), workspace_path, strategy_name,
                     targets_json,
                     budget_token, budget_turn, budget_time_seconds,
                     cooldown_base, cooldown_jitter, min_cooldown,
@@ -1584,6 +1591,7 @@ class StudyStore:
             objective=row["objective"],
             executor_type=row["executor_type"],
             engine=row["engine"] if "engine" in row.keys() else "phases",
+            hitl=bool(row["hitl"]) if "hitl" in row.keys() else False,
             workspace_path=row["workspace_path"],
             strategy_name=row["strategy_name"],
             metric_targets=metric_targets,

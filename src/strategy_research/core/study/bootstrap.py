@@ -326,6 +326,7 @@ def create_study_record(
     selected_agents: list[str] | None = None,
     graph_override: "StudyGraph | None" = None,
     engine: str = "phases",
+    hitl: bool = False,
     auto_route: bool = True,
     loop_config: dict | None = None,
 ) -> "StudyRecord":
@@ -424,6 +425,7 @@ def create_study_record(
             lazy_detection_interval=lazy_detection_interval,
             keep_recent=keep_recent,
             engine=engine,
+            hitl=hitl,
             loop_config=loop_config,
         )
         # Goal ledger under the study's own identity: parallel studies

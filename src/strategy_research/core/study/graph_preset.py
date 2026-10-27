@@ -15,9 +15,15 @@
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+import json
+from typing import Callable
 
-from strategy_research.core.runtimes import END, GraphEngine
+from strategy_research.core.runtimes import (
+    END,
+    INTERRUPT_KEY,
+    GraphEngine,
+    GraphInterrupt,
+)
 
 from .phase_engine import (
     BranchContext,
@@ -33,7 +39,13 @@ EventSink = Callable[[str, dict], None]
 def build_research_engine(
     ctx: BranchContext, *, sink: EventSink | None = None
 ) -> GraphEngine:
-    """构造研究轮次阶段图：researcher → novelty →(条件) claims → execution → evaluation。"""
+    """构造研究轮次阶段图：researcher → novelty →(条件)[gate]→ claims → execution → evaluation。
+
+    ``study.hitl=True`` 时在 novelty 与 claims 之间注册 HITL 审批门
+    （构建期条件：关门时图里没有 gate 节点，形状与历史逐字节一致）。
+    门语义与契约照抄 langgraph_engine._make_novelty_gate_node，见
+    docs/stage-hitl-gate-graph-design-20261027.md。
+    """
     engine = GraphEngine(sink=sink)
     engine.add_node("researcher", _researcher_node(ctx))
     engine.add_node("novelty", _novelty_node(ctx))
@@ -41,9 +53,15 @@ def build_research_engine(
     engine.add_node("execution", _execution_node(ctx))
     engine.add_node("evaluation", _evaluation_node(ctx))
     engine.add_edge("researcher", "novelty")
+    hitl = bool(getattr(ctx.study, "hitl", False))
+    if hitl:
+        engine.add_node("gate", _novelty_gate_node(ctx))
     engine.add_conditional_edge(
-        "novelty", _novelty_router, {"proceed": "claims", "dup": END}
+        "novelty", _novelty_router,
+        {"proceed": "gate" if hitl else "claims", "dup": END},
     )
+    if hitl:
+        engine.add_edge("gate", "claims")
     engine.add_edge("claims", "execution")
     engine.add_edge("execution", "evaluation")
     engine.add_edge("evaluation", END)
@@ -56,10 +74,18 @@ def run_phases_via_graph(
     """图形态的 phases 分支：输出契约与 `_run_phases_branch` 完全一致。
 
     返回 RoundOutcome（正常路径）或 abort dict（novelty 拒绝，
-    与旧分支同形：{"round", "run_name", "aborted", "reason"}）。
+    与旧分支同形：{"round", "run_name", "aborted", "reason"}），
+    或 HITL 暂停 dict（{"paused_for_approval", "interrupt_id", ...}，
+    与 langgraph 分支同形，runner._handle_hitl_pause 直接消费）。
     """
     engine = build_research_engine(ctx, sink=sink)
     state = engine.run({})
+
+    # HITL 暂停早退（同 _run_langgraph_branch 对 paused 的早退）：
+    # 只认门节点的中断；max_hops 等其他中断不落库、不伪装成审批暂停。
+    interrupt = state.get(INTERRUPT_KEY)
+    if isinstance(interrupt, dict) and interrupt.get("reason") == "novelty_gate":
+        return _paused_result(ctx, interrupt.get("data") or {})
 
     if state.get("novelty_ok") is False:
         return {
@@ -96,6 +122,7 @@ def _researcher_node(ctx: BranchContext) -> Callable[[dict], dict]:
 
     def node(state: dict) -> dict:
         from strategy_research.core.autoresearch import run_researcher_phase
+
         from .runner import SR_AGENT_MAX_ITER
 
         runner._emit(session, "study_phase", {
@@ -149,6 +176,70 @@ def _novelty_router(state: dict) -> str:
     return "proceed" if state.get("novelty_ok") else "dup"
 
 
+def _novelty_gate_node(ctx: BranchContext) -> Callable[[dict], dict]:
+    """HITL novelty 审批门（暂停段）：novelty 去重通过后、回测花钱前中断。
+
+    payload 五字段 + 门前 ``study_phase(novelty_gate, interrupted)`` 事件
+    照抄 langgraph_engine._make_novelty_gate_node:242-283；恢复段（resume）
+    另立文档。空假设防御性放行：正常流里空假设已被 novelty 去重门路由
+    dup/END（旧引擎门自带 no_hypothesis 检查是因为它的门在去重之前）。
+    """
+    runner = ctx.runner
+
+    def node(state: dict) -> dict:
+        hypothesis = state.get("hypothesis") or ""
+        if not hypothesis:
+            return state
+        runner._emit(ctx.session, "study_phase", {
+            "study_id": ctx.sid, "round": ctx.round_num,
+            "phase": "novelty_gate", "status": "interrupted",
+            "hypothesis": hypothesis[:200],
+        })
+        raise GraphInterrupt("novelty_gate", {
+            "type": "novelty_gate",
+            "study_id": ctx.sid,
+            "round_num": ctx.round_num,
+            "hypothesis": hypothesis,
+            "predicted_affected": state.get("predicted_affected", []),
+            "message": f"Round {ctx.round_num}: 请审批 researcher 假设",
+        })
+
+    return node
+
+
+def _paused_result(ctx: BranchContext, payload: dict) -> dict:
+    """审批暂停：interrupt 落库 + awaiting_approval 事件 + paused dict。
+
+    事件形状照抄 langgraph_engine.py:639-648（phase 用 ``novelty_gate``
+    ——前端零消费此事件，审批卡片由 runner 的 ``study_paused`` 驱动）；
+    返回 dict 六字段供 ``_handle_hitl_pause`` 消费（``interrupt_id`` /
+    ``hypothesis`` 必需，runner.py:421-426 直接读取）。
+    """
+    runner = ctx.runner
+    hypothesis = payload.get("hypothesis", "")
+    interrupt = runner.study_store.create_interrupt(
+        study_id=ctx.sid,
+        round_num=ctx.round_num,
+        interrupt_type=payload.get("type", "novelty_gate"),
+        payload=json.dumps(payload, ensure_ascii=False),
+    )
+    runner._emit(ctx.session, "study_phase", {
+        "study_id": ctx.sid, "round": ctx.round_num,
+        "phase": "novelty_gate", "status": "awaiting_approval",
+        "interrupt_id": interrupt.interrupt_id,
+        "hypothesis": hypothesis,
+        "gate_message": payload.get("message", ""),
+    })
+    return {
+        "round": ctx.round_num,
+        "run_name": ctx.run_name,
+        "paused_for_approval": True,
+        "study_id": ctx.sid,
+        "interrupt_id": interrupt.interrupt_id,
+        "hypothesis": hypothesis,
+    }
+
+
 def _claims_node(ctx: BranchContext) -> Callable[[dict], dict]:
     runner = ctx.runner
 
@@ -163,7 +254,7 @@ def _claims_node(ctx: BranchContext) -> Callable[[dict], dict]:
 
 
 def _execution_node(ctx: BranchContext) -> Callable[[dict], dict]:
-    runner, study, session = ctx.runner, ctx.study, ctx.session
+    runner, session = ctx.runner, ctx.session
 
     def node(state: dict) -> dict:
         runner._emit(session, "study_phase", {
@@ -203,6 +294,7 @@ def _evaluation_node(ctx: BranchContext) -> Callable[[dict], dict]:
 
     def node(state: dict) -> dict:
         from strategy_research.core.autoresearch import run_evaluation_phase
+
         from .runner import SR_AGENT_MAX_ITER
 
         runner._emit(ctx.session, "study_phase", {

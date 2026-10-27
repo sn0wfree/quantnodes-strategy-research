@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from .graph_engine import END, GraphEngine, GraphInterrupt
+from .graph_engine import END, INTERRUPT_KEY, GraphEngine, GraphInterrupt
 from .nodes.llm import make_llm_node
 from .nodes.react import ReactConfig, make_react_node
 
@@ -14,6 +14,7 @@ __all__ = [
     "END",
     "GraphEngine",
     "GraphInterrupt",
+    "INTERRUPT_KEY",
     "make_llm_node",
     "make_react_node",
     "ReactConfig",

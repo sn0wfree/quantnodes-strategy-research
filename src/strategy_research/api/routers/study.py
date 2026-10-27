@@ -220,6 +220,7 @@ class StudyStartRequest(BaseModel):
     strategy_name: str
     executor_type: str = "autoresearch"  # "autoresearch" (default, round-based) or "workflow" (DAG)
     engine: str = "phases"  # "phases" | "langgraph" ("dag" removed: no executor)
+    hitl: bool = False  # novelty 审批门：回测前暂停等人工审批（引擎无关）
     metric_targets: Optional[list[MetricTargetModel]] = Field(
         None, max_length=16,
     )
@@ -314,6 +315,7 @@ async def study_start(req: StudyStartRequest, request: Request):
             auto_compose_graph=req.auto_compose_graph,
             selected_agents=req.selected_agents,
             engine=req.engine,
+            hitl=req.hitl,
         )
         # Queue without blocking the request; uncaught submit errors
         # are logged via the done callback.
@@ -328,6 +330,7 @@ async def study_start(req: StudyStartRequest, request: Request):
             "execution_status": StudyStatus.QUEUED.value,
             "executor_type": "autoresearch",
             "engine": req.engine,
+            "hitl": req.hitl,
         }
     except HTTPException:
         raise
