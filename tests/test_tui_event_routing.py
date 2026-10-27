@@ -214,7 +214,16 @@ class TestUpdateStreamingDelta:
 
 
 class TestSessionRunAgentLoop:
-    """Smoke test that ChatSession._run_agent_loop wires on_event."""
+    """Smoke test that ChatSession._run_agent_loop wires on_event.
+
+    These pin the LEGACY AgentLoop path, so the test opts out of the Gateway
+    route (QNODES_NEW_ENTRY=0). The Gateway path has its own suite in
+    tests/test_cli_gateway_path.py.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _legacy_path(self, monkeypatch):
+        monkeypatch.setenv("QNODES_NEW_ENTRY", "0")
 
     def test_session_builds_agent_loop_with_routing(self):
         from strategy_research.cli.tui.session import ChatSession

@@ -98,3 +98,31 @@ S5  全量分道跑 + 审计门②                                              
 3. 原始 9/5 发现销账（安全 ×4 / plan-dag 阻塞 / 死代码簇 / 小 bug ×2）；
 4. 性能基线（GraphEngine 单 turn 延迟、mailbox 吞吐）；
 5. 文档对齐（架构图/目录结构/契约文档与实际代码一致）。
+
+## 7. 阶段 5 待办（本清单明确移交）
+
+| # | 事项 | 前置 | 理由 |
+|---|---|---|---|
+| P5-1 | Gateway chat 路径补历史注入 + 事件持久化 + message_id 签发，然后删 chat/CLI 旧分支 | 无 | 现新路径 `message_id: None`、不写事件库——直接删旧分支是功能退化 |
+| P5-2 | 删除 `study/langgraph_engine.py` 全家 + `_run_langgraph_branch` | 先查 `study.engine='langgraph'` 真实使用面 | 约 1000+ 行 + 6 个测试文件；错误删除 = 研究执行无路可退 |
+| P5-3 | SSE 单轨（删 `api/sse_buffer.py` + `api/session/bridge_v2.py`） | 3b-2 一直延后 | 8 个生产文件 + 7 个测试文件，属独立工程 |
+| P5-4 | `ContextBuilder`（4 builder）并入 ContextHub | AgentLoop 迁移 | 合并不是删文件，要迁调用方 |
+| P5-5 | 安全债 ×4（9/5 评估记录） | 无 | 与本次架构重构正交，需独立排查 |
+
+## 8. 本轮实测数据
+
+- 删除代码：约 40 行（旧队列通道）+ 门接线若干
+- 新增门禁：10 条架构测试
+- 回归：受影响 148 + 更宽 232 全绿；lint 全绿
+
+## 9. 全量分道跑发现的预存问题（非本次改动引入）
+
+| 问题 | 证据 | 性质 |
+|---|---|---|
+| `test_alpha_zoo_adapter` ×2 失败 | 单独跑也失败（9/21 已记录）；`compute_as_series` 返回 180 行而 wide.notna 只有 120 | **预存实现缺陷**（`compute_as_series` 未按约定 dropna） |
+| `test_e2e_full_flow.py::TestNoProgress::test_no_progress_termination` 挂起 | 单跑也挂；栈显示 `_approval_event.wait(timeout=1800)`——`make_loop()` 未传 `approval_timeout`，no_progress 触发审批后无人应答，默认等 30 分钟 | **预存测试缺陷**（应传 `approval_timeout=0.1` + `approval_policy="reject"`） |
+
+两者都不属阶段 4 的删除/隔离问题，也不由本轮改动引入。处理建议：
+- alpha_zoo：修 `compute_as_series`（`wide.dropna(how="any")` 后再 stack），属独立 bugfix；
+- e2e no_progress：测试补 `approval_timeout` 参数，属测试修复。
+两者都列进阶段 5（P5-6/P5-7），本轮不夹带。

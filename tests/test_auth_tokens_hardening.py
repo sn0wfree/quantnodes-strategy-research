@@ -13,7 +13,17 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from pathlib import Path
+
+import pytest
+
+# Windows has no POSIX permission bits: 0o600 cannot be observed and
+# chmod(0o000) does not make a file unreadable, so permission-semantics
+# tests are POSIX-only (pre-existing platform gap, not a product bug).
+_posix_only = pytest.mark.skipif(
+    os.name == "nt", reason="POSIX permission semantics unavailable on Windows"
+)
 
 import pytest
 
@@ -26,7 +36,13 @@ def _reset_secret_cache(tmp_path, monkeypatch):
 
     at._SECRET_CACHE = None
     # Redirect HOME so the persisted-file path is per-test.
+    # Windows: Path.home() reads USERPROFILE (or HOMEDRIVE+HOMEPATH), NOT HOME —
+    # setting HOME alone left these tests writing to the real
+    # C:\Users\<user>\.quantnodes\jwt_secret, corrupting the host config.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOMEDRIVE", str(tmp_path.drive or "C:"))
+    monkeypatch.setenv("HOMEPATH", str(tmp_path)[len(str(tmp_path.drive or "C:")):])
     # Default: do NOT allow the dev secret fallback.
     monkeypatch.delenv("STRATEGY_RESEARCH_ALLOW_DEV_SECRET", raising=False)
     yield
@@ -70,6 +86,7 @@ def test_persisted_file_round_trip(tmp_path, monkeypatch):
     assert s2 == s1
 
 
+@_posix_only
 def test_persisted_file_written_atomically_with_0o600(tmp_path, monkeypatch):
     """A6: the file is created with O_EXCL | 0o600 to avoid the
     brief window where it exists with default umask."""
@@ -95,6 +112,7 @@ def test_empty_file_is_treated_as_missing(tmp_path, monkeypatch):
     assert secret_file.read_bytes() == s  # persisted
 
 
+@_posix_only
 def test_corrupt_permission_unreadable_raises(tmp_path, monkeypatch):
     """A6/A7: OSError on read → RuntimeError (no silent dev fallback)."""
     secret_file = Path.home() / ".quantnodes" / "jwt_secret"
@@ -108,6 +126,7 @@ def test_corrupt_permission_unreadable_raises(tmp_path, monkeypatch):
         at._load_secret()
 
 
+@_posix_only
 def test_corrupt_permission_with_opt_in_flag_uses_dev_secret(
     tmp_path, monkeypatch
 ):
@@ -124,6 +143,7 @@ def test_corrupt_permission_with_opt_in_flag_uses_dev_secret(
     assert secret == b"strategy-research-dev-secret"
 
 
+@_posix_only
 def test_oserror_on_write_raises(tmp_path, monkeypatch):
     """Even when the file does not exist, mkdir() failure should raise
     rather than silently fall back (parent dir is read-only)."""
@@ -136,6 +156,7 @@ def test_oserror_on_write_raises(tmp_path, monkeypatch):
         at._load_secret()
 
 
+@_posix_only
 def test_corrupt_permission_opt_in_value_must_be_one(tmp_path, monkeypatch):
     """STRATEGY_RESEARCH_ALLOW_DEV_SECRET=0/yes/true/anything-else is treated
     as 'off'. Only literal '1' enables the fallback."""

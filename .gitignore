@@ -97,3 +97,6 @@ evals/_ws/
 scorecard.json
 
 pyright-report.json
+
+# test-generated strategy workspaces (not source)
+/strategies/
