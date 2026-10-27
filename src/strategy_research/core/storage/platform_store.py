@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -123,6 +124,9 @@ class PlatformStore:
         self._global_path = self._data_dir / "platform.sqlite"
         self._global_conn: sqlite3.Connection | None = None
         self._session_conns: dict[str, sqlite3.Connection] = {}
+        # F2：fanout 分支（跨线程）事件回流前的物理护栏——sqlite 连接
+        # 不允许并发使用，全部公开方法串行化短事务（不变量 7 的物理形态）。
+        self._lock = threading.Lock()
         self._init_global = False
         self._ensure_global_tables()
 
@@ -130,7 +134,7 @@ class PlatformStore:
 
     def _get_global_conn(self) -> sqlite3.Connection:
         if self._global_conn is None:
-            conn = sqlite3.connect(str(self._global_path))
+            conn = sqlite3.connect(str(self._global_path), check_same_thread=False)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=5000")
             self._global_conn = conn
@@ -140,7 +144,7 @@ class PlatformStore:
     def _get_session_conn(self, session_id: str) -> sqlite3.Connection:
         if session_id not in self._session_conns:
             path = self._sessions_dir / f"{session_id}.sqlite"
-            conn = sqlite3.connect(str(path))
+            conn = sqlite3.connect(str(path), check_same_thread=False)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=5000")
             conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
@@ -174,23 +178,24 @@ class PlatformStore:
         schema_v: str = "1",
     ) -> Event:
         """追加事件到 event_log。"""
-        conn = self._get_session_conn(session_id)
-        ts = time.time()
-        cursor = conn.execute(
-            "INSERT INTO event_log (ts, kind, data_json, run_id, schema_v) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (ts, kind, json.dumps(data, ensure_ascii=False, default=str),
-             run_id, schema_v),
-        )
-        conn.commit()
-        return Event(
-            seq=cursor.lastrowid or 0,
-            ts=ts,
-            kind=kind,
-            data=data,
-            run_id=run_id,
-            schema_v=schema_v,
-        )
+        with self._lock:
+            conn = self._get_session_conn(session_id)
+            ts = time.time()
+            cursor = conn.execute(
+                "INSERT INTO event_log (ts, kind, data_json, run_id, schema_v) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (ts, kind, json.dumps(data, ensure_ascii=False, default=str),
+                 run_id, schema_v),
+            )
+            conn.commit()
+            return Event(
+                seq=cursor.lastrowid or 0,
+                ts=ts,
+                kind=kind,
+                data=data,
+                run_id=run_id,
+                schema_v=schema_v,
+            )
 
     def replay(
         self,
@@ -201,20 +206,21 @@ class PlatformStore:
         limit: int = 1000,
     ) -> list[Event]:
         """按 session 从指定 seq 起重放事件（fold 用）。"""
-        conn = self._get_session_conn(session_id)
-        conditions = ["seq > ?"]
-        params: list[Any] = [from_seq]
-        if kinds:
-            placeholders = ",".join("?" for _ in kinds)
-            conditions.append(f"kind IN ({placeholders})")
-            params.extend(kinds)
-        params.append(limit)
-        rows = conn.execute(
-            f"SELECT seq, ts, kind, data_json, run_id, schema_v "
-            f"FROM event_log WHERE {' AND '.join(conditions)} "
-            f"ORDER BY seq LIMIT ?",
-            params,
-        ).fetchall()
+        with self._lock:
+            conn = self._get_session_conn(session_id)
+            conditions = ["seq > ?"]
+            params: list[Any] = [from_seq]
+            if kinds:
+                placeholders = ",".join("?" for _ in kinds)
+                conditions.append(f"kind IN ({placeholders})")
+                params.extend(kinds)
+            params.append(limit)
+            rows = conn.execute(
+                f"SELECT seq, ts, kind, data_json, run_id, schema_v "
+                f"FROM event_log WHERE {' AND '.join(conditions)} "
+                f"ORDER BY seq LIMIT ?",
+                params,
+            ).fetchall()
         return [
             Event(seq=r[0], ts=r[1], kind=r[2], data=json.loads(r[3]),
                   run_id=r[4], schema_v=r[5])
@@ -222,8 +228,9 @@ class PlatformStore:
         ]
 
     def latest_seq(self, session_id: str) -> int:
-        conn = self._get_session_conn(session_id)
-        row = conn.execute("SELECT MAX(seq) FROM event_log").fetchone()
+        with self._lock:
+            conn = self._get_session_conn(session_id)
+            row = conn.execute("SELECT MAX(seq) FROM event_log").fetchone()
         return row[0] if row and row[0] is not None else 0
 
     # ── blob 去重 ────────────────────────────────────────
@@ -231,20 +238,22 @@ class PlatformStore:
     def store_blob(self, session_id: str, content: bytes) -> str:
         """内容寻址去重：同哈希不重写，返回哈希。"""
         h = hashlib.sha256(content).hexdigest()
-        conn = self._get_session_conn(session_id)
-        conn.execute(
-            "INSERT OR IGNORE INTO blobs (hash, content, size, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (h, content, len(content), time.time()),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._get_session_conn(session_id)
+            conn.execute(
+                "INSERT OR IGNORE INTO blobs (hash, content, size, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (h, content, len(content), time.time()),
+            )
+            conn.commit()
         return h
 
     def read_blob(self, session_id: str, hash_: str) -> bytes:
-        conn = self._get_session_conn(session_id)
-        row = conn.execute(
-            "SELECT content FROM blobs WHERE hash = ?", (hash_,)
-        ).fetchone()
+        with self._lock:
+            conn = self._get_session_conn(session_id)
+            row = conn.execute(
+                "SELECT content FROM blobs WHERE hash = ?", (hash_,)
+            ).fetchone()
         if row is None:
             raise KeyError(f"blob {hash_[:12]} not found")
         return row[0]
@@ -253,34 +262,36 @@ class PlatformStore:
 
     def register_session(self, session_key: str) -> str:
         """惰性建会话：返回 session_id（已存在则复用并刷新 last_active）。"""
-        conn = self._get_global_conn()
-        row = conn.execute(
-            "SELECT session_id FROM session_registry WHERE session_key = ?",
-            (session_key,),
-        ).fetchone()
-        now = time.time()
-        if row:
-            session_id = row[0]
-            conn.execute(
-                "UPDATE session_registry SET last_active = ? WHERE session_id = ?",
-                (now, session_id),
-            )
-        else:
-            session_id = str(uuid.uuid4())
-            conn.execute(
-                "INSERT INTO session_registry (session_id, session_key, created_at, last_active) "
-                "VALUES (?, ?, ?, ?)",
-                (session_id, session_key, now, now),
-            )
-        conn.commit()
-        return session_id
+        with self._lock:
+            conn = self._get_global_conn()
+            row = conn.execute(
+                "SELECT session_id FROM session_registry WHERE session_key = ?",
+                (session_key,),
+            ).fetchone()
+            now = time.time()
+            if row:
+                session_id = row[0]
+                conn.execute(
+                    "UPDATE session_registry SET last_active = ? WHERE session_id = ?",
+                    (now, session_id),
+                )
+            else:
+                session_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO session_registry (session_id, session_key, created_at, last_active) "
+                    "VALUES (?, ?, ?, ?)",
+                    (session_id, session_key, now, now),
+                )
+            conn.commit()
+            return session_id
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        conn = self._get_global_conn()
-        rows = conn.execute(
-            "SELECT session_id, session_key, created_at, last_active "
-            "FROM session_registry ORDER BY last_active DESC"
-        ).fetchall()
+        with self._lock:
+            conn = self._get_global_conn()
+            rows = conn.execute(
+                "SELECT session_id, session_key, created_at, last_active "
+                "FROM session_registry ORDER BY last_active DESC"
+            ).fetchall()
         return [
             {"session_id": r[0], "session_key": r[1],
              "created_at": r[2], "last_active": r[3]}
@@ -290,33 +301,35 @@ class PlatformStore:
     # ── 工件登记（P-3） ──────────────────────────────────
 
     def register_artifact(self, artifact: Artifact) -> None:
-        conn = self._get_global_conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO artifact_registry "
-            "(artifact_id, kind, uri, sha256, bytes, schema_v, status, "
-            " created_at, created_by_run_id, parent_id, study_id, round_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                artifact.artifact_id, artifact.kind, artifact.uri,
-                artifact.sha256, artifact.bytes, artifact.schema_v,
-                artifact.status, artifact.created_at or time.time(),
-                artifact.created_by_run_id, artifact.parent_id,
-                artifact.study_id, artifact.round_id,
-            ),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._get_global_conn()
+            conn.execute(
+                "INSERT OR REPLACE INTO artifact_registry "
+                "(artifact_id, kind, uri, sha256, bytes, schema_v, status, "
+                " created_at, created_by_run_id, parent_id, study_id, round_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    artifact.artifact_id, artifact.kind, artifact.uri,
+                    artifact.sha256, artifact.bytes, artifact.schema_v,
+                    artifact.status, artifact.created_at or time.time(),
+                    artifact.created_by_run_id, artifact.parent_id,
+                    artifact.study_id, artifact.round_id,
+                ),
+            )
+            conn.commit()
 
     def list_artifacts(self, study_id: str | None = None) -> list[Artifact]:
-        conn = self._get_global_conn()
-        if study_id:
-            rows = conn.execute(
-                "SELECT * FROM artifact_registry WHERE study_id = ? ORDER BY created_at",
-                (study_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM artifact_registry ORDER BY created_at"
-            ).fetchall()
+        with self._lock:
+            conn = self._get_global_conn()
+            if study_id:
+                rows = conn.execute(
+                    "SELECT * FROM artifact_registry WHERE study_id = ? ORDER BY created_at",
+                    (study_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM artifact_registry ORDER BY created_at"
+                ).fetchall()
         return [
             Artifact(
                 artifact_id=r[0], kind=r[1], uri=r[2], sha256=r[3],
@@ -330,14 +343,16 @@ class PlatformStore:
     # ── 健康 ─────────────────────────────────────────────
 
     def quick_check(self) -> bool:
-        conn = self._get_global_conn()
-        result = conn.execute("PRAGMA quick_check").fetchone()
+        with self._lock:
+            conn = self._get_global_conn()
+            result = conn.execute("PRAGMA quick_check").fetchone()
         return result[0] == "ok" if result else False
 
     def close(self) -> None:
-        for conn in self._session_conns.values():
-            conn.close()
-        self._session_conns.clear()
-        if self._global_conn:
-            self._global_conn.close()
-            self._global_conn = None
+        with self._lock:
+            for conn in self._session_conns.values():
+                conn.close()
+            self._session_conns.clear()
+            if self._global_conn:
+                self._global_conn.close()
+                self._global_conn = None

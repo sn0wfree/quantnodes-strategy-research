@@ -93,7 +93,8 @@ def test_worker_receives_branch_context():
         return {}
 
     build_fanout_engine(worker=spy).run({"run_id": "r", "payloads": ["x"]})
-    assert seen == {"id": "r:1", "ordinal": 1, "payload": "x"}
+    # budget 字段由 F2 加入：state 无 run_budget 约定键时为 None
+    assert seen == {"id": "r:1", "ordinal": 1, "payload": "x", "budget": None}
 
 
 def test_branch_state_is_snapshot_not_shared():

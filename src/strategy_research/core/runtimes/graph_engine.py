@@ -30,6 +30,8 @@ from typing import Any, Callable
 from langgraph.graph import END as _LG_END
 from langgraph.graph import StateGraph
 
+from .run_budget import RunBudget
+
 EventSink = Callable[[str, dict], None]
 NodeFn = Callable[[dict], dict]
 RouterFn = Callable[[dict], str]
@@ -273,6 +275,13 @@ class GraphEngine:
             "max_parallel": spec.max_parallel,
         })
         cancel = threading.Event()
+        # 预算树（F2，规则④）：state["run_budget"] 是父 RunBudget → 拆分时
+        # 均分预留，每支分支拿自己的切片（branch.budget），落定后 settle 归还。
+        # 无约定键则 branch.budget=None，零打扰。
+        parent_budget = state.get("run_budget")
+        slices: list[RunBudget] | None = None
+        if isinstance(parent_budget, RunBudget) and branches:
+            slices = parent_budget.reserve(len(branches))
 
         def run_one(ordinal: int, payload: Any) -> dict:
             branch_id = f"{parent_run}:{ordinal}" if parent_run else f"{node_name}:b{ordinal}"
@@ -290,7 +299,12 @@ class GraphEngine:
             branch_started = time.perf_counter()
             branch_state = {
                 **state,
-                "branch": {"id": branch_id, "ordinal": ordinal, "payload": payload},
+                "branch": {
+                    "id": branch_id,
+                    "ordinal": ordinal,
+                    "payload": payload,
+                    "budget": slices[ordinal - 1] if slices else None,
+                },
             }
             try:
                 result = spec.worker(payload, branch_state)
@@ -331,6 +345,8 @@ class GraphEngine:
                 })
 
         results = [by_ordinal[i + 1] for i in range(len(branches))]
+        if slices:
+            parent_budget.absorb(*slices)  # settle 归还（父线程，单点）
         out = {**state, "fanout_results": results}
         interrupted = next((e for e in results if e["status"] == "interrupted"), None)
         if interrupted is not None:
