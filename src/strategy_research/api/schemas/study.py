@@ -182,6 +182,7 @@ class StudyStartResponse(BaseModel):
     execution_status: str
     executor_type: str
     engine: str = "phases"
+    hitl: bool = False
 
 
 class StudyDirectiveCreatedResponse(BaseModel):

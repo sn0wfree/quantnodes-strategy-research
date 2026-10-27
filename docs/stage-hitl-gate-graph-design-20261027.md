@@ -30,8 +30,13 @@ researcher → novelty ──(dup)──→ END
                  └─(proceed)→ [gate]（仅 hitl=True 时注册）→ claims → execution → evaluation
 ```
 
-- 门节点放 **novelty 去重之后、claims/执行之前**——审批发生在花钱（回测）前，
-  与旧引擎语义一致。
+- 门节点放 **novelty 去重之后、claims/执行之前**——审批发生在花钱（回测）前。
+- **与旧引擎的次序差异（如实记录）**：旧 langgraph 门接在
+  `researcher → novelty_gate → 各下游目标`（`langgraph_engine.py:386`），
+  即审批发生在**去重之前**（门内自带 no_hypothesis 检查，完整去重
+  `_check_novelty` 不在旧引擎流内）；新路径先去重后审批——重复假设
+  由去重门自动归档拒绝，不再消耗人工审批。语义更优而非等价；hitl
+  此前处于休眠（默认 phases、WebUI 不传 engine），无存量行为可破坏。
 - 空假设不需要门内守卫：上游 `_novelty_gate → runner._check_novelty` 已把
   空假设路由到 dup/END（旧引擎门自带 no_hypothesis 检查是因为它的门在去重之前）。
 - **构建期条件注册**（`build_research_engine` 里 `getattr(ctx.study, "hitl", False)`）：
