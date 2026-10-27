@@ -402,6 +402,7 @@ _LANE_LLM_FILES = frozenset({
     "test_llm_live.py",             # opt-in live LLM (QNODES_LIVE_LLM=1)
     "test_react_live.py",           # opt-in live react tool-loop
     "test_fanout_live.py",          # opt-in live fanout multi-subagent
+    "test_p51b_live.py",            # opt-in live chat streaming/tools/history
     "test_entry_migration_live.py", # opt-in live gateway/entry migration
 })
 

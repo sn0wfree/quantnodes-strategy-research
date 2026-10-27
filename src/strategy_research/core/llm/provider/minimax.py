@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from ..errors import LLMConfigError, LLMQuotaError
+from ._think_stream import ThinkBlockBuffer
 from .base import ProviderAdapter
 
 
@@ -19,6 +20,35 @@ class MiniMaxAdapter(ProviderAdapter):
     THINK_PATTERN = re.compile(r"<think>([\s\S]*?)<\/think>")
     THINK_OPEN = "<think>"
     THINK_CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        super().__init__()
+        # 流式跨 chunk 的 <think> 块缓冲器：content / reasoning_content
+        # 各一个实例（同一 adapter 只服务一个请求，状态天然请求内）。
+        self._think_buffers: dict[str, ThinkBlockBuffer] = {}
+
+    def _buffer_for(self, field: str) -> ThinkBlockBuffer:
+        buf = self._think_buffers.get(field)
+        if buf is None:
+            buf = ThinkBlockBuffer()
+            self._think_buffers[field] = buf
+        return buf
+
+    def fix_delta(self, delta: dict[str, Any]) -> dict[str, Any]:
+        """Pipeline Step 1：把跨 chunk 的 ``<think>`` 块缓冲成完整块交出。
+
+        为什么必需：MiniMax 的 SSE 按 BPE token 切分，``<think>`` / ``</think>``
+        会被拆到多个 chunk。下游（``extract_thinking_from_delta`` /
+        ``sanitize_delta``）用的都是**单 chunk 正则** THINK_PATTERN，所以这里
+        必须保证交出的每个 chunk 中的标签是完整的——否则思考内容漏进 UI 且
+        ``delta_thinking`` 为空（实测 chunk[1] = ``'<think>We need answe'``）。
+        """
+        out = dict(delta)
+        for field_name in ("content", "reasoning_content"):
+            value = out.get(field_name)
+            if isinstance(value, str) and value:
+                out[field_name] = self._buffer_for(field_name).fix(value)
+        return out
 
     @property
     def name(self) -> str:
