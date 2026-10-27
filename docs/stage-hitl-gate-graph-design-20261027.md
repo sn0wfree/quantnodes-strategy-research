@@ -103,7 +103,9 @@ reject / 超时 = 现有完整语义（M1 过期 + M2 预算入账 + H2 防幽�
 
 ## 7. 后续（不在本轮）
 
-- **resume 机制**：持久化重建 + `engine.run(state, start=<门后继>)` vs
-  吸收 SqliteSaver——用户拍板后另立文档。
+- **resume 机制**：决策记录与业界调研见
+  `hitl-resume-industry-research-20261027.md`（2026-10-27）——倾向
+  方案 A（持久化重建 + `start=`），实施要点清单见该文 §5；
+  检查点能力的吸收形态定为「phase 渐进落盘」，SqliteSaver 出局。
 - P5-2 删 langgraph 分支（本门建成前置即满足：HITL 能力已在主流程落地）。
 - WebUI start 表单暴露 hitl 开关（可选）。
