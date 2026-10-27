@@ -66,11 +66,10 @@ class SessionFileRouter:
 | ~~F emit 单点索引~~ | 方向对（与 S3 同源），但 `EventStore.emit` 是最热路径，必须异步化才能加索引写 → 复杂度回升；列为**升级目标** |
 
 **为什么 B 可行（实测支撑）**：
-- 当前 83 会话 / 190 消息 → 全量扫描几十毫秒；
-- 三条约束把线性退化变成有界延迟：
-  1. 会话按 `updated_at` 倒序，凑够 `limit` 即停；
-  2. 单文件查询加 `LIMIT`；
-  3. 最多扫 200 个会话（`SR_SEARCH_MAX_SESSIONS`），响应带 `scanned_sessions` / `truncated`。
+- 真实会话极短（WildChat ≈5 条消息/会话；本地中位 2 条）；
+- 单文件查询 0.13-0.6ms，100 万级消息的会话也只需 20ms；
+- 约束机制：**双层超时**（总 400ms / 单文件 50ms）+ 会话上限 500（按 `updated_at` 倒序）
+  + 每文件 LIMIT 50，把线性退化变成有界延迟（详见 §4.2）。
 
 **业界对照**：SQLite 官方推荐「每租户一文件」并明确跨文件搜索要靠应用层 fan-out；
 Claude Code（每会话一 .jsonl）**不做跨会话全文搜索**；OpenCode / LangGraph 保持单库。
@@ -81,11 +80,88 @@ Claude Code（每会话一 .jsonl）**不做跨会话全文搜索**；OpenCode /
 
 ### 4.1 B 的实现要点
 
-1. 从全局库取用户会话（`updated_at DESC`、`archived = 0`）；
-2. 逐个 `_session_db(sid)` 查 `messages_fts MATCH`（带 LIMIT）；
+1. 从全局库取用户会话（`updated_at DESC`、`archived = 0`，上限见 §4.3）；
+2. 逐个 `_session_db(sid)` 查 `messages_fts MATCH`（**连接复用**，不新建连接）；
 3. 合并按 rank 排序、截断 limit；
 4. 单会话文件损坏/缺失 → 跳过并计数（不整体失败）；
-5. 返回既有字段 + `scanned_sessions` / `truncated`。
+5. 返回既有字段 + `scanned_sessions` / `skipped_sessions` / `timed_out` / `truncated`。
+
+### 4.2 超时参数（实测标定）
+
+**双层超时**，用 `sqlite3.set_progress_handler` 实现（实测可精确中断，开销 -3% 无感知）：
+
+| 参数 | 值 | 依据（实测） |
+|---|---|---|
+| `SR_SEARCH_TIMEOUT_MS` | **400** | 覆盖 800-3000 个真实会话；400ms 内用户无卡顿感 |
+| `SR_SEARCH_PER_SESSION_MS` | **50** | 10 万条消息的会话也只需 20ms，50ms 有余量 |
+| `SR_SEARCH_MAX_SESSIONS` | **500** | 按 `updated_at` 倒序，优先搜最近会话 |
+| `SR_SEARCH_HITS_PER_SESSION` | **50** | 与 LIMIT 配合，避免单会话占满结果 |
+
+**实现要点**：
+- 连接复用（`_session_db` 线程本地缓存）：单文件成本从 0.45ms 降到 0.13ms（3.5x）；
+- `set_progress_handler` **必须在 `finally` 里清理**（`(None, 0)`），否则残留 handler 会中断后续复用连接的查询；
+- 中断粒度 = **单文件**（该文件剩余结果丢弃并计入 `skipped_sessions`），不做「半个文件」的不完整状态；
+- 返回结构诚实反映未搜完：`timed_out` + `scanned_sessions` + `total_sessions`。
+
+### 4.3 参数标定实测数据
+
+**单文件查询耗时 vs 消息数**（trigram FTS，热缓存）：
+
+| 消息数 | 耗时 |
+|---|---|
+| 100 | 0.59 ms |
+| 1,000 | 1.76 ms |
+| 10,000 | 10.2 ms |
+| 30,000 | 34.5 ms |
+| 100,000 | ~20 ms（LIMIT 50 生效后） |
+
+**会话规模增长**（每会话 100 条消息，激进假设）：
+
+| 会话数 | 全量扫描 |
+|---|---|
+| 100 | 71 ms |
+| 300 | 214 ms |
+| 500 | 372 ms |
+| 1,000 | 786 ms |
+| 2,000 | 1,549 ms |
+
+**业界会话长度调研**：
+- WildChat（100 万真实对话）：2.5M 轮次 / 1M 会话 ≈ **2.5 轮/会话 ≈ 5 条消息**；
+- 本地实测：83 会话 / 190 消息，中位数 2 条、最大 4 条；
+- 结论：**真实会话极短（5-10 条消息）**，上表按每会话 100 条标定属保守估计，实际成本约 1/3。
+
+**并发测试结论（不采用并发）**：
+
+| 场景 | 4 线程相对串行 |
+|---|---|
+| 小文件（40 条）× 100-600 个 | 1.1-2.1x（不稳定） |
+| **CPU 密集（20k 条 × 4 个）** | **0.50-0.70x（稳定变慢）** |
+| 8+ 线程 | 0.4-1.0x |
+
+原因：Python `sqlite3` 在执行 SQL 期间**持有 GIL**，CPU 密集查询无法并行；只有 I/O 段（连接打开）能重叠，
+收益上限约 1.4x，且随文件增大转为负收益。**结论：串行 + 连接复用 + 超时，不用线程池。**
+
+### 4.4 已发现的既有缺陷：中文 2 字词搜不到（需一并修复）
+
+实测 `trigram` 分词器**要求查询串至少 3 个字符**：
+
+| 查询 | 结果 |
+|---|---|
+| `策略`、`回测`、`动量`（2 字） | **0 hits** |
+| `策略回测`、`夏普比率`（4 字） | ✅ |
+| `abc`、`test`（≥3 字符） | ✅ |
+
+中文高频词大量是 2 字，**当前搜索对中文基本不可用**（这也是前端未接线的可能原因）。
+
+**修复方案**：查询预处理——`len(query) < 3` 时改用该会话 `messages` 表的 `LIKE '%词%'` 扫描
+（慢但正确）；否则走 FTS。约 0.3d，**必须与 B 一并实现**，否则「搜索可用」是假的。
+
+### 4.5 升级触发器
+
+任一命中则切 F（`EventStore.emit` 单点索引 + 异步队列）：
+- 实测搜索 P95 > 500ms；
+- 会话数 > 2,000（400ms 预算开始覆盖不足）；
+- 出现「必须搜索全部历史」的真实需求。
 
 ## 5. 决策二：sessions 表的归属与双写
 
@@ -128,7 +204,7 @@ ensure_migrated(sid):
 | `web_session_db._get_db_path()` | → 保留，语义降级为「全局库路径」（测试大量 patch 它） |
 | `EventStore`（S1 门面） | PlatformStore 从 `db_path=legacy` 切 `data_dir=data/`；`_db_path` 用于 messages 的部分不动（EventStore 只碰 event_log） |
 | `projection_store` / `Projector` | `db_path` 改传会话文件路径（S2a 已让 projector 零改动，只换构造参数） |
-| `search_sessions` | 改查 `platform.search_index`（方案 A） |
+| `search_sessions` | 重写为 fan-out 遍历（§4.1）+ 双层超时（§4.2）+ 短查询 LIKE 兜底（§4.4）；**不建任何索引表** |
 
 ## 8. 验收
 
@@ -136,9 +212,18 @@ ensure_migrated(sid):
 2. **幂等**：重复 `ensure_migrated` 不重复插入、不报错；
 3. **隔离性**：两个会话各写消息互不可见（不同文件）；
 4. **旧库只读**：迁移后旧库文件 mtime 不变（可用 stat 断言）；
-5. **搜索**：`/search` 在 index 缺失/存在两态下返回正确（方案 A 落地后）；
-6. **回归**：webui / sse / message_parts / event_log_schema / projector 全家绿；
-7. **回退演练**：删 `data/` → 重启 → 数据从旧库恢复。
+5. **搜索正确性**：
+   - 跨会话命中：在会话 A 写入的消息能从会话 B 的搜索中查到（同用户）；
+   - 中文 2 字词：`策略`/`回测` 走 LIKE 兜底后能命中（§4.4 修复前为 0 hits）；
+   - 归档过滤：`archived=1` 的会话不出现在结果里；
+   - 用户隔离：A 用户搜不到 B 用户的会话。
+6. **搜索健壮性**：
+   - 超时：构造超过 400ms 的会话量 → 返回部分结果 + `timed_out=true` + `scanned_sessions`；
+   - 单文件超时：构造超大单会话 → 该会话计入 `skipped_sessions`，其余正常返回；
+   - 损坏文件：删除某个会话文件 → 跳过不报错；
+   - handler 清理：连续多次搜索后，复用的连接仍能正常查询（验证 `finally` 清理）。
+7. **回归**：webui / sse / message_parts / event_log_schema / projector 全家绿；
+8. **回退演练**：删 `data/` → 重启 → 数据从旧库恢复。
 
 ## 9. 风险与缓解
 
