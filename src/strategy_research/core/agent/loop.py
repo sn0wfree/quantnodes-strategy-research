@@ -435,6 +435,14 @@ class AgentLoop(
         else:
             from .context_injector import build_default_injectors
             self._injectors = build_default_injectors()
+        # P5-4: pre-run 上下文（goal/memory）经 ContextHub 收集——唯一组装点。
+        # per-iteration / post-response injector 仍走 self._injectors 原通路
+        # （设计：docs/stage-p54-context-hub-w0-design-20261027.md §1）。
+        from ..context import ContextHub
+        from .context_providers import build_prerun_context_provider
+
+        self.context_hub = ContextHub()
+        self.context_hub.register(build_prerun_context_provider(self, self._injectors))
         # DSH-inspired: steering inbox for mid-loop message injection.
         self._inbox: asyncio.Queue = asyncio.Queue()
 
@@ -567,13 +575,19 @@ class AgentLoop(
         full_task = task
         if context:
             full_task = context + "\n\n" + task
-        # DSH-inspired: run pre-run injectors (order=-100, e.g. GoalContextInjector)
-        for injector in self._injectors:
-            if getattr(injector, "order", 0) < 0:
-                try:
-                    full_task = injector.inject_pre_run(self, full_task, [])
-                except Exception:  # noqa: BLE001
-                    pass  # injectors must not break the loop
+        # P5-4: pre-run 上下文经 ContextHub 收集（原 injector 循环迁入；
+        # 整链桥接保持检索 query 的叠加语义，full_task 逐字节等价——
+        # docs/stage-p54-context-hub-w0-design-20261027.md §2）。
+        from ..context.protocol import ContextQuery
+
+        bundle = self.context_hub.build(
+            ContextQuery(task_text=full_task, session_id=self.session_id),
+        )
+        if bundle.items:
+            full_task = (
+                "\n\n".join(item.content for item in bundle.items)
+                + "\n\n" + full_task
+            )
         result = LoopResult()
         messages = self.context_builder.build_initial_messages(full_task, history=history)
         result.messages = list(messages)

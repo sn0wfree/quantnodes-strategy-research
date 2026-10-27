@@ -52,6 +52,26 @@ def test_platform_never_imports_study_domain():
     assert not violations, "平台层反向依赖研究域:\n" + "\n".join(violations)
 
 
+def test_context_hub_never_imports_producers():
+    """core/context 不得 import 任何生产方域（agent/goal/study）。
+
+    ContextHub 三条硬约束之一（docs/context-hub-discussion.md §3）：
+    「生产方注册进中枢，中枢从不 import 生产方」——否则它就是下一个
+    上帝对象。生产方适配器住在 core/agent/context_providers.py，
+    方向是 域→平台。
+    """
+    violations: list[str] = []
+    for path in _iter_py(SRC / "core" / "context"):
+        for module, lineno in _imports(path):
+            if any(
+                module.startswith(f"strategy_research.core.{producer}")
+                or module.startswith(f"core.{producer}")
+                for producer in ("agent", "goal", "study")
+            ):
+                violations.append(f"{path.relative_to(SRC)}:{lineno} -> {module}")
+    assert not violations, "ContextHub 反向依赖生产方:\n" + "\n".join(violations)
+
+
 def test_platform_never_imports_fastapi():
     """core/gateway 契约：零 FastAPI import（挂载式宿主的前提）。
 

@@ -748,12 +748,12 @@ class TestAgentLoopCompleteFlow:
         assert messages[3]["content"] == "injected2"
 
     def test_custom_injector_modifies_task(self):
-        """Custom injector can modify the task string."""
+        """Custom injector can modify the task string (P5-4 前缀契约）。"""
         class _TaskModifier:
             name = "modifier"
             order = -100
             def inject_pre_run(self, loop, task, messages):
-                return f"MODIFIED: {task}"
+                return f"MODIFIED\n\n{task}"
 
         loop = AgentLoop(
             config=_FakeConfig(),
@@ -762,4 +762,4 @@ class TestAgentLoopCompleteFlow:
             injectors=[_TaskModifier()],
         )
         full_task, _, _, _ = loop._prepare_run("original", None)
-        assert full_task == "MODIFIED: original"
+        assert full_task == "MODIFIED\n\noriginal"

@@ -70,9 +70,12 @@ class TestAgentLoopDSHIntegration:
     def test_default_injectors_loaded(self):
         """AgentLoop loads default injectors when none provided."""
         loop = self._make_loop()
-        assert len(loop._injectors) == 3
+        assert len(loop._injectors) == 4
         names = {i.name for i in loop._injectors}
-        assert names == {"goal_context", "todos_snapshot", "goal_continuation"}
+        assert names == {
+            "goal_context", "memory_retriever",
+            "todos_snapshot", "goal_continuation",
+        }
 
     def test_custom_injectors(self):
         """AgentLoop accepts custom injectors."""

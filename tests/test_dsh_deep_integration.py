@@ -7,20 +7,12 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch, AsyncMock
-
-import pytest
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from strategy_research.core.agent.context_injector import (
-    GoalContextInjector,
-    TodosInjector,
-    GoalContinuationInjector,
-    build_default_injectors,
-)
 from strategy_research.core.agent.loop import AgentLoop, LoopResult
-from strategy_research.core.agent.tools import ToolRegistry, BaseTool
+from strategy_research.core.agent.tools import BaseTool, ToolRegistry
 
 
 class _FakeConfig:
@@ -42,7 +34,11 @@ class _DenyAllGuard:
 
 
 class _TrackingInjector:
-    """Injector that records all calls."""
+    """Injector that records all calls.
+
+    inject_pre_run follows the P5-4 prefix contract (block + "\\n\\n" +
+    task) — the hub bridge decomposes blocks by it.
+    """
 
     def __init__(self, name: str, order: int):
         self.name = name
@@ -51,7 +47,7 @@ class _TrackingInjector:
 
     def inject_pre_run(self, loop, task, messages):
         self.calls.append(("pre_run", task))
-        return task + " [modified]"
+        return "[modified]\n\n" + task
 
     def inject_per_iteration(self, loop, messages):
         self.calls.append(("per_iter", len(messages)))
@@ -75,11 +71,12 @@ def _make_loop(injectors=None, registry=None):
 
 class TestPrepareRunIntegration:
     def test_pre_run_injectors_modify_task(self):
-        """Pre-run injectors (order < 0) can modify the task string."""
+        """Pre-run injectors (order < 0) can modify the task string
+        (P5-4 契约：前缀注入 block + "\\n\\n" + task)。"""
         inj = _TrackingInjector("test", -100)
         loop = _make_loop(injectors=[inj])
         full_task, result, messages, t0 = loop._prepare_run("original task", None)
-        assert full_task == "original task [modified]"
+        assert full_task == "[modified]\n\noriginal task"
         assert inj.calls == [("pre_run", "original task")]
 
     def test_pre_run_injectors_run_before_context_builder(self):
@@ -117,8 +114,8 @@ class TestPrepareRunIntegration:
         inj = _TrackingInjector("test", -100)
         loop = _make_loop(injectors=[inj])
         full_task, _, _, _ = loop._prepare_run("task", "ctx")
-        # Context first, then injector appends
-        assert full_task == "ctx\n\ntask [modified]"
+        # Context first, then injector prepends its block
+        assert full_task == "[modified]\n\nctx\n\ntask"
 
     def test_pre_run_injector_exception_safe(self):
         """Broken pre-run injector doesn't crash _prepare_run."""
@@ -194,7 +191,6 @@ class TestExecuteToolCallGuardIntegration:
 
         # Capture emitted events
         emitted = []
-        original_emit = loop._emit
         def _capture_emit(event_type, data):
             emitted.append((event_type, data))
         loop._emit = _capture_emit
