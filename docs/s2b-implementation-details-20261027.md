@@ -50,21 +50,42 @@ class SessionFileRouter:
   3 触发器，**顺序敏感块原样调用**，不重写）；
 - **全局库**：只建 `sessions` + `schema_migrations` + `migrated_sessions` + `search_index`。
 
-## 4. 决策一：FTS 跨会话搜索（必须拍板）
+## 4. 决策一：FTS 跨会话搜索 —— **定案：遍历会话文件（B）**
 
-`search_sessions` 的 SQL 是「messages_fts JOIN messages JOIN sessions WHERE
-sessions.user_id = ? AND archived = 0」——**跨库 JOIN，分文件后物理上不可能**。
+> 完整调研见 `cross-session-search-research-20261027.md`（六方案对比 + 业界调研）。
 
-三个方案：
+**结论**：`search_sessions` 改为 fan-out 遍历 per-session 文件，各自 FTS 查询后合并。
+不建索引、不做同步。
 
-| 方案 | 做法 | 代价 | 评价 |
-|---|---|---|---|
-| **A（推荐）** | 全局库维护 `search_index` 表（session_id, message_id, user_id, content, created_at），消息写入时同步插入；搜索直接查它 | 一条冗余表（内容重复存一份）+ 写入多一步 | 简单、O(1) 查询、与现有 SQL 形态最接近；存储代价可控（消息 190 行、未来增长线性） |
-| B | 搜索时遍历所有 per-session 文件逐个 MATCH | 无冗余 | 83 个文件 × 每查询 = 慢；文件数随使用增长 |
-| C | 删除 `/search` 端点 | 零成本 | 前端未接线，但测试与 API 契约会破 |
+| 为什么不是别的 | 理由 |
+|---|---|
+| ~~A 全局 search_index~~ | 需要「写消息 → 同步索引」的跨库同步；实测 SQLite **禁止触发器跨库写**（`qualified table names are not allowed ... within triggers`），只能应用层同步；且 S3 写入归一后同步点要挪 |
+| ~~C 删端点~~ | 功能回退、破契约 |
+| ~~D 放弃分库~~ | 架构倒退（违背 P-2 自包含定案） |
+| ~~E hash 引用索引~~ | 当前消息内容仅 28KB，hash 间接层不值得 |
+| ~~F emit 单点索引~~ | 方向对（与 S3 同源），但 `EventStore.emit` 是最热路径，必须异步化才能加索引写 → 复杂度回升；列为**升级目标** |
 
-**推荐 A**，理由：前端未接线说明这不是热点；但保留能力比删端点好，且实现只是一张
-小表 + 一个写入点。**需要在 S2b 开工前确认**。
+**为什么 B 可行（实测支撑）**：
+- 当前 83 会话 / 190 消息 → 全量扫描几十毫秒；
+- 三条约束把线性退化变成有界延迟：
+  1. 会话按 `updated_at` 倒序，凑够 `limit` 即停；
+  2. 单文件查询加 `LIMIT`；
+  3. 最多扫 200 个会话（`SR_SEARCH_MAX_SESSIONS`），响应带 `scanned_sessions` / `truncated`。
+
+**业界对照**：SQLite 官方推荐「每租户一文件」并明确跨文件搜索要靠应用层 fan-out；
+Claude Code（每会话一 .jsonl）**不做跨会话全文搜索**；OpenCode / LangGraph 保持单库。
+→ 我们的 B 已是业界最完整的做法。
+
+**升级触发器**（任一命中则切 F：emit 单点索引 + 异步队列）：
+实测 P95 > 500ms / 会话数 > 500 / 出现「搜全部历史」的真实需求。
+
+### 4.1 B 的实现要点
+
+1. 从全局库取用户会话（`updated_at DESC`、`archived = 0`）；
+2. 逐个 `_session_db(sid)` 查 `messages_fts MATCH`（带 LIMIT）；
+3. 合并按 rank 排序、截断 limit；
+4. 单会话文件损坏/缺失 → 跳过并计数（不整体失败）；
+5. 返回既有字段 + `scanned_sessions` / `truncated`。
 
 ## 5. 决策二：sessions 表的归属与双写
 
@@ -129,8 +150,11 @@ ensure_migrated(sid):
 | 测试大量 patch `_get_db_path` | 保留该函数，语义改为「全局库路径」；涉及会话文件的测试改用 `_session_db` |
 | 旧库遗留 `-wal`/`-shm` 未 checkpoint | 迁移前对旧库执行 `PRAGMA wal_checkpoint(TRUNCATE)`（只读连接下改为一过性读写） |
 
-## 10. 开工前需要的三个确认
+## 10. 决策状态（2026-10-27 已定案）
 
-1. **FTS 方案 A（全局 search_index）** —— 推荐，需确认；
-2. **sessions 一次性搬迁 + 全局唯一写入** —— 推荐，需确认；
-3. **旧库只读保留、永不删除**（回退依赖） —— 推荐，需确认。
+| # | 决策 | 状态 |
+|---|---|---|
+| 1 | **FTS = 遍历会话文件（B）+ 三条约束** | ✅ 定案（调研见 `cross-session-search-research-20261027.md`） |
+| 2 | **sessions + blob_refs 一次性搬全局库，全局唯一写入** | ✅ 定案（`blob_refs` 无 session 列，属跨会话共享资源，与 sessions 同归全局） |
+| 3 | **旧库只读保留、永不删除**（回退依赖） | ✅ 定案 |
+| 4 | 迁移协议：台账 + 事务内逐表 COUNT 校验 | ✅ 定案 |
