@@ -63,6 +63,7 @@ from ..session.web_session_db import (  # noqa: E402,F401  (re-exports for old i
     _row_to_message,
     _row_to_session,
     _run_schema_migrations,
+    _session_db,
     _validate_identifier,
 )
 
@@ -97,18 +98,21 @@ def persist_message(
     parts_json = json.dumps(parts, ensure_ascii=False) if parts is not None else None
     metadata_json = json.dumps(metadata, ensure_ascii=False) if metadata is not None else None
     try:
-        conn = _get_db()
-        row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        gconn = _get_db()
+        # S2a 分库预备：sessions 校验/计数走全局连接，messages/parts 写入
+        # 走会话级连接（S2b 后两者是不同文件，不能同一事务混用）。
+        row = gconn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if not row:
             logger.warning("[DB] persist_message: session %s not found", session_id)
             return msg_id
+        sconn = _session_db(session_id)
 
         # Level 2 / Phase 2 commit 6: parts_json and tool_call_id
         # columns were dropped. Build the INSERT dynamically based on
         # which columns are present, so this function works on both
         # pre- and post-migration DBs during the cleanup window.
-        has_parts_json = _has_column(conn, "messages", "parts_json")
-        has_tool_call_id = _has_column(conn, "messages", "tool_call_id")
+        has_parts_json = _has_column(sconn, "messages", "parts_json")
+        has_tool_call_id = _has_column(sconn, "messages", "tool_call_id")
 
         cols = ["id", "session_id", "role", "content", "created_at", "metadata_json", "message_type", "seq"]
         placeholders = ["?", "?", "?", "?", "?", "?", "?", "?"]
@@ -126,7 +130,7 @@ def persist_message(
             f"INSERT INTO messages ({','.join(cols)}) "
             f"VALUES ({','.join(placeholders)})"
         )
-        conn.execute(sql, vals)
+        sconn.execute(sql, vals)
         logger.debug("[DB] persisted id=%s", msg_id)
 
         # Dual-write: also insert parts into message_parts (Level 2, Phase 2
@@ -141,18 +145,19 @@ def persist_message(
                 part_id = str(uuid.uuid4())
                 part_type = p.get("type", "text")
                 part_data_json = json.dumps(p, ensure_ascii=False)
-                conn.execute(
+                sconn.execute(
                     "INSERT INTO message_parts "
                     "(id, message_id, session_id, type, data_json, seq, time_created) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (part_id, msg_id, session_id, part_type, part_data_json, i, ts),
                 )
 
-        conn.execute(
+        gconn.execute(
             "UPDATE sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?",
             (ts, session_id),
         )
-        conn.commit()
+        sconn.commit()
+        gconn.commit()
     except Exception as exc:
         logger.error("persist_message failed for session %s: %s", session_id, exc, exc_info=True)
     return msg_id
@@ -333,20 +338,24 @@ def delete_messages(session_id: str, message_ids: list[str]) -> None:
     if not message_ids:
         return
     try:
-        conn = _get_db()
+        # S2a 分库预备：messages 删除走会话级连接；sessions 计数走全局连接
+        # （S2b 后两者是不同文件，不能在同一事务里混用）。
+        sconn = _session_db(session_id)
         placeholders = ",".join("?" for _ in message_ids)
-        cur = conn.execute(
+        cur = sconn.execute(
             f"DELETE FROM messages WHERE session_id = ? AND id IN ({placeholders})",
             [session_id, *message_ids],
         )
         # Only decrement by the number of rows actually deleted, so
         # message_count can never go negative when some ids don't exist.
         deleted = cur.rowcount
-        conn.execute(
+        gconn = _get_db()
+        gconn.execute(
             "UPDATE sessions SET message_count = message_count - ?, updated_at = ? WHERE id = ?",
             (deleted, time.time(), session_id),
         )
-        conn.commit()
+        sconn.commit()
+        gconn.commit()
     except Exception as exc:
         logger.error("delete_messages failed for session %s: %s", session_id, exc)
 
@@ -377,6 +386,8 @@ async def list_messages(
     user_id = getattr(request.state, "user_id", "anonymous")
     conn = _get_db()
     _fetch_session_owned(conn, session_id, user_id)
+    # S2a 分库预备：消息/parts 查询走会话级连接（S2b 后与全局库分文件）。
+    sconn = _session_db(session_id)
     params: list[Any] = [session_id]
     cursor_sql = ""
     if before is not None:
@@ -390,7 +401,7 @@ async def list_messages(
         )
         params.extend([session_id, before])
     params.append(limit + 1)  # +1 to detect has_more
-    rows = conn.execute(
+    rows = sconn.execute(
         f"SELECT * FROM messages WHERE session_id = ? {cursor_sql} "
         "ORDER BY seq ASC LIMIT ?",
         params,
@@ -404,7 +415,7 @@ async def list_messages(
     if rows:
         message_ids = [r["id"] for r in rows[:limit]]
         placeholders = ",".join("?" * len(message_ids))
-        parts_rows = conn.execute(
+        parts_rows = sconn.execute(
             f"SELECT message_id, data_json FROM message_parts "
             f"WHERE message_id IN ({placeholders}) ORDER BY message_id, seq",
             message_ids,

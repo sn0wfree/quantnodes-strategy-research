@@ -116,9 +116,11 @@ class SessionStore:
     ) -> list[Message]:
         """Read messages from messages + message_parts tables (legacy path)."""
         logger.debug("[STORE] get_messages (db) session=%s limit=%d", session_id, limit)
-        from ..routers.web_session import _get_db, _row_to_message
+        # S2a 分库预备：消息/parts 属会话级表，走会话级连接（S2b 后为
+        # per-session 文件；当前与旧库同一文件，行为不变）。
+        from ..routers.web_session import _row_to_message, _session_db
 
-        with _get_db() as conn:
+        with _session_db(session_id) as conn:
             conn.row_factory = sqlite3.Row
             # Most-recent N (chronological): DESC + reverse. Previously
             # this took the OLDEST N, breaking LLM context in long chats.

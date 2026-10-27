@@ -23,7 +23,11 @@ sys.path.insert(0, str(SRC_PATH))
 def temp_db(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
+    # S2a: _get_db()/_session_db() 的路径解析发生在 web_session_db 模块内，
+    # 必须 patch 该模块的 _get_db_path（router 的同名重导出只影响 router 自身）。
     import strategy_research.api.routers.web_session as ws
+    import strategy_research.api.session.web_session_db as _wsdb
+    monkeypatch.setattr(_wsdb, "_get_db_path", lambda: db_path)
     monkeypatch.setattr(ws, "_get_db_path", lambda: db_path)
     yield db_path
 
