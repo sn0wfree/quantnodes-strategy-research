@@ -34,8 +34,8 @@ for rel in ["core/study/runner.py", "core/swarm/runtime.py", "core/workflow/orch
     classes = re.findall(r"^class (\w+)", t, re.M)
     print(f"  {rel}: {len(t.splitlines())} lines, classes={classes[:4]}")
 
-print("\n════ 引擎层：两引擎的公共契约与实际差异")
-for rel in ["core/study/phase_engine.py", "core/study/langgraph_engine.py"]:
+print("\n════ 引擎层：公共契约")
+for rel in ["core/study/phase_engine.py"]:
     p = root / rel
     t = p.read_text(encoding="utf-8", errors="ignore")
     print(f"\n-- {rel} ({len(t.splitlines())} lines)")
@@ -47,7 +47,7 @@ for rel in ["core/study/phase_engine.py", "core/study/langgraph_engine.py"]:
             print(f"     {kw}: {t.count(kw)}")
 
 print("\n════ 引擎层：谁在用哪个引擎")
-for eng in ("phase_engine", "langgraph_engine"):
+for eng in ("phase_engine",):
     users = []
     for p in root.rglob("*.py"):
         t = p.read_text(encoding="utf-8", errors="ignore")

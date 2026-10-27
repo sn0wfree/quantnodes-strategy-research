@@ -3,7 +3,9 @@
 Originally lived in tests/test_study_dag_engine.py together with the
 dag-engine golden-output tests (now archived to attic/). Only the dispatch
 -tests + plan-dag async test remain — they verify the live dispatch
-contract (engine='dag' → langgraph, asyncio.to_thread planner wiring).
+contract: the phases graph path is the only executor; legacy engine
+values ('dag', 'langgraph') pass through unchanged and fall back to
+phases with a warning (P5-2).
 """
 from __future__ import annotations
 
@@ -23,22 +25,27 @@ class TestEngineDispatch:
         study = SimpleNamespace(engine="phases")
         assert _resolve_engine(study, round_num=1) == "phases"
 
-    def test_engine_dag_passes_through_to_dispatcher_fallback(self):
-        """engine='dag' is deprecated: no remap, no dag executor.
+    def test_legacy_engine_values_pass_through_to_fallback(self):
+        """engine='dag'/'langgraph' are deprecated: no remap, no executor.
 
         _resolve_engine returns the value unchanged; the dispatcher
-        falls back to phases with a warning (pre-Step-2 if/else
-        semantics). Previously this test asserted the dag->langgraph
-        remap — that fake option was removed in the final cleanup.
+        has no key for them so _resolve_branch_fn falls back to phases
+        with a warning (pre-Step-2 if/else semantics).
         """
         from types import SimpleNamespace
 
         from strategy_research.core.study import phase_engine
 
-        study = SimpleNamespace(engine="dag")
-        assert phase_engine._resolve_engine(study, round_num=1) == "dag"
-        # dispatcher has no 'dag' key -> run_round_phases falls back to phases
         assert "dag" not in phase_engine._ENGINE_BRANCHES
+        assert "langgraph" not in phase_engine._ENGINE_BRANCHES
+        for legacy in ("dag", "langgraph"):
+            study = SimpleNamespace(engine=legacy)
+            assert phase_engine._resolve_engine(study, round_num=1) == legacy
+            # fallback resolution lands on the graph path
+            from strategy_research.core.study.graph_preset import (
+                run_phases_via_graph,
+            )
+            assert phase_engine._resolve_branch_fn(legacy) is run_phases_via_graph
 
 
 class TestPlanDagAsync:

@@ -73,19 +73,15 @@ def test_verdict_is_mutable_for_guidance_gate():
     assert outcome.verdict == "discard"
 
 
-def test_dispatch_table_shape_is_phases_and_langgraph():
-    """Exactly two dispatch keys — unknown values are handled by
-    run_round_phases's fallback (warning -> phases), preserving the
-    pre-Step-2 if/else semantics where only 'langgraph' took the
-    graph branch."""
+def test_dispatch_table_shape_is_phases_only():
+    """One dispatch key — P5-2 retired the langgraph branch; unknown
+    values (incl. legacy 'langgraph' rows) are handled by
+    _resolve_branch_fn's fallback (warning -> phases)."""
     from strategy_research.core.study import phase_engine
 
-    assert set(phase_engine._ENGINE_BRANCHES) == {"phases", "langgraph"}
+    assert set(phase_engine._ENGINE_BRANCHES) == {"phases"}
     assert phase_engine._ENGINE_BRANCHES["phases"] is phase_engine._run_phases_branch
-    assert (
-        phase_engine._ENGINE_BRANCHES["langgraph"]
-        is phase_engine._run_langgraph_branch
-    )
+    assert not hasattr(phase_engine, "_run_langgraph_branch")
 
 
 def test_resolve_engine_passes_unknown_values_through(monkeypatch):

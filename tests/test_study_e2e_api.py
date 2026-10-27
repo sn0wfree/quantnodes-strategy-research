@@ -11,18 +11,17 @@ Tests the complete study lifecycle via HTTP API calls:
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from pathlib import Path
 
 import httpx
 import pytest
-
 
 # ── Test Setup ──────────────────────────────────────────────────────
 
 def _build_asgi_app():
     """Build the FastAPI app for testing."""
     from fastapi import FastAPI
+
     from strategy_research.api.middleware import AuthMiddleware
     from strategy_research.api.routers import chat, study
     from strategy_research.api.routers.web_session import router as session_router
@@ -87,7 +86,7 @@ def _setup_sessions_db(tmp_path: Path, session_ids: list[str] | None = None) -> 
 # ── Test Cases ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_study_lifecycle_langgraph(tmp_path, monkeypatch):
+async def test_study_lifecycle(tmp_path, monkeypatch):
     """Complete study lifecycle test - API endpoint verification."""
     # Setup environment
     monkeypatch.setenv("QUANTNODES_RESEARCH_GOAL_DB_PATH", str(tmp_path / "goals.db"))

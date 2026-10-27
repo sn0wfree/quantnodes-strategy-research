@@ -1,8 +1,8 @@
 """Tests for engine_common helpers added during P0-2/P0-3 fixes.
 
-Focus: session row creation for SSE validation, interrupt lookup that
-returns responded interrupts, and the run_round_phases langgraph
-mapping path.
+Focus: session row creation for SSE validation, and interrupt lookup
+that returns responded interrupts (the lookup the HITL poll loop and
+resume path read).
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from strategy_research.core.study.engine_common import (
     ensure_study_session,
     get_study_session_db_path,
 )
-
 
 # ── Fixtures ────────────────────────────────────────────────
 
@@ -234,7 +233,7 @@ def test_get_interrupt_returns_latest(study_store) -> None:
         ).fetchone()
     ).study_id
 
-    i1 = study_store.create_interrupt(
+    study_store.create_interrupt(
         study_id=sid, round_num=3, interrupt_type="first",
     )
     i2 = study_store.create_interrupt(

@@ -121,10 +121,12 @@ class ControlToken:
 
 from .runner_aegis import RunnerAegisMixin
 from .runner_knowledge import RunnerKnowledgeMixin
-from .runner_langgraph import RunnerLangGraphMixin
+
+# P5-2: RunnerLangGraphMixin retired — the graph path (graph_preset) is the
+# only round executor; HITL pause/resume lives on this class directly.
 
 
-class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledgeMixin):
+class AutoresearchRunner(RunnerAegisMixin, RunnerKnowledgeMixin):
     """AEGIS-powered study executor with round-loop + AEGIS hooks.
 
     Replaces AutoresearchExecutor for studies using executor_type='autoresearch'.
@@ -452,8 +454,8 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
         # Resume the round from checkpoint
         self.study_store.update_execution_status(sid, StudyStatus.RUNNING)
         # Reconstruct context from study object (same as _run_one_round):
-        # read state against the run's own strategy copy so langgraph
-        # agents see exactly what the interrupted round was seeing.
+        # read state against the run's own strategy copy so resumed phases
+        # see exactly what the interrupted round was seeing.
         study = self._get_study()
         _path = Path(study.workspace_path).resolve()
         _strategy = study.strategy_name
@@ -480,24 +482,15 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
         _current_state["study_strategy_path"] = str(
             _run_dir.relative_to(_path) / "strategy.py"
         )
+        # Resume from persisted artifacts (plan A): rebuild state from the
+        # interrupt payload and continue at claims — no checkpointer.
         self._round_start_clock = time.perf_counter()
-        # Resume dispatch by the study's engine (fixed at creation):
-        # graph-path rounds rebuild from persisted artifacts + start=,
-        # langgraph rounds keep the checkpointer path until P5-2 retires it.
-        if getattr(self._get_study(), "engine", "phases") == "langgraph":
-            resumed = await asyncio.to_thread(
-                self._resume_round_langgraph, _path, _strategy,
-                _current_state, _run_dir, _graph,
-                session=session, sid=sid, round_num=round_num,
-                directive_text=directive_text,
-            )
-        else:
-            resumed = await asyncio.to_thread(
-                self._resume_round_via_graph, _path, _strategy,
-                _current_state, _run_dir, _graph,
-                session=session, sid=sid, round_num=round_num,
-                directive_text=directive_text,
-            )
+        resumed = await asyncio.to_thread(
+            self._resume_round_via_graph, _path, _strategy,
+            _current_state, _run_dir, _graph,
+            session=session, sid=sid, round_num=round_num,
+            directive_text=directive_text,
+        )
         if resumed.get("paused_for_approval"):
             # The resume hit the gate again (typically: no
             # checkpointer → the fallback re-ran the round and
@@ -549,6 +542,76 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
                 and resumed.get("verdict", "discard") == "keep"
             )
         return resumed, "advance"
+
+    async def _wait_for_approval(
+        self, sid: str, round_num: int, timeout_s: int = 600
+    ) -> str:
+        """Poll for HITL approval.
+
+        Returns the resolved decision: ``"approved"``, ``"rejected"``,
+        ``"cancelled"`` (cancel/pause observed while waiting), or
+        ``"timeout"`` when no response arrived within ``timeout_s``.
+
+        (Was on RunnerLangGraphMixin until P5-2 — engine-agnostic, the
+        graph-path HITL loop uses it.)
+        """
+        import asyncio
+        start = time.time()
+        while time.time() - start < timeout_s:
+            # M1/L9: cancel (and pause) must cut the wait short — the old
+            # loop slept through a cancel for up to the full timeout.
+            if self.control.cancelled or self.control.paused:
+                return "cancelled"
+            interrupt = self.study_store.get_interrupt_for_round(sid, round_num)
+            if interrupt is not None and interrupt.status in ("approved", "rejected"):
+                return interrupt.status
+            await asyncio.sleep(5)
+        return "timeout"
+
+    def _expire_interrupt(self, sid: str, round_num: int) -> None:
+        """Mark the round's pending HITL interrupt expired (M1).
+
+        Without this the interrupt row stayed ``pending`` forever after a
+        timeout/rejection: the webui approval card reappeared on reload
+        and a late answer was silently written to no consumer.
+        """
+        try:
+            interrupt = self.study_store.get_pending_interrupt(sid, round_num)
+            if interrupt is not None:
+                self.study_store.respond_interrupt(interrupt.interrupt_id, "expired")
+        except Exception:  # noqa: BLE001 — best-effort cleanup
+            logger.warning(
+                "failed to expire interrupt round=%s study=%s",
+                round_num, sid, exc_info=True,
+            )
+
+    def _load_graph(self, path: Path, sid: str) -> "StudyGraph":
+        """Load the study's persisted execution graph.
+
+        Falls back to ``DEFAULT_STANDARD_GRAPH`` when ``graph.json`` is
+        missing or malformed (legacy studies pre-migration). Validates
+        and logs warnings; never raises — a broken graph must not block
+        a running study.
+
+        (Was on RunnerLangGraphMixin until P5-2 — it is engine-agnostic
+        graph.json loading consumed by the round preamble and HITL
+        resume, so it lives on the runner directly now.)
+        """
+        from .graph import StudyGraph
+        from .graph_templates import DEFAULT_STANDARD_GRAPH
+
+        graph = StudyGraph.load(path, sid)
+        if graph is None:
+            graph = DEFAULT_STANDARD_GRAPH
+        errors = graph.validate()
+        if errors:
+            logger.warning(
+                "Study %s graph validation warnings: %s; "
+                "falling back to standard template",
+                sid, errors,
+            )
+            graph = DEFAULT_STANDARD_GRAPH
+        return graph
 
     def _resume_round_via_graph(
         self, path, strategy, current_state, run_dir, graph,
@@ -933,100 +996,6 @@ class AutoresearchRunner(RunnerAegisMixin, RunnerLangGraphMixin, RunnerKnowledge
             )
         except Exception:  # noqa: BLE001
             logger.debug("save_agent_record failed for %s", agent_id)
-
-    def _rebuild_phase_outputs(
-        self, agent_outputs: dict[str, Any], graph,
-    ) -> dict:
-        """Translate the DAG ``agent_outputs`` map back into the
-        legacy ``run_execution_phase`` / ``run_evaluation_phase``
-        result schema that downstream callers consume.
-        """
-        researcher_output = agent_outputs.get("researcher") or {}
-        # An agent that hits max_iterations yields a plain-text answer
-        # ("Reached max_iterations=... without a final answer.") instead
-        # of the expected JSON action object. Parse JSON strings when
-        # possible; fall back to {} so downstream .get() calls don't
-        # crash with AttributeError (same pattern as backtest/decide
-        # handling below).
-        if isinstance(researcher_output, str):
-            try:
-                parsed = json.loads(researcher_output)
-                researcher_output = parsed if isinstance(parsed, dict) else {}
-            except (json.JSONDecodeError, TypeError):
-                researcher_output = {}
-        elif not isinstance(researcher_output, dict):
-            researcher_output = {}
-        backtest_raw = agent_outputs.get("backtest") or {}
-        if isinstance(backtest_raw, str):
-            try:
-                backtest_raw = json.loads(backtest_raw)
-            except (json.JSONDecodeError, TypeError):
-                backtest_raw = {}
-        metrics = (
-            backtest_raw.get("metrics", {}) if isinstance(backtest_raw, dict)
-            else {}
-        )
-        backtest_result = (
-            backtest_raw if isinstance(backtest_raw, dict) else {}
-        )
-        backtest_error = (
-            backtest_raw.get("error") if isinstance(backtest_raw, dict)
-            and not backtest_raw.get("success") else None
-        )
-
-        decision_raw = agent_outputs.get("decide") or {}
-        if isinstance(decision_raw, str):
-            try:
-                decision_raw = json.loads(decision_raw)
-            except (json.JSONDecodeError, TypeError):
-                decision_raw = {}
-        verdict = "discard"
-        if isinstance(decision_raw, dict):
-            verdict = decision_raw.get("verdict") or decision_raw.get(
-                "decision", "discard",
-            )
-
-        # Lightweight decision stub: downstream calls .to_dict().
-        from ..strategy_acceptance import (
-            AcceptanceDecision,
-            decide,
-        )
-        try:
-            decision_obj = decide(metrics=metrics, llm_verdict=None)
-        except Exception:  # noqa: BLE001
-            decision_obj = AcceptanceDecision(
-                accept=verdict != "discard",
-                reason=verdict,
-                hard_passed=verdict != "discard",
-            )
-
-        return {
-            "researcher_output": researcher_output,
-            "data_quality_output": agent_outputs.get("data_quality") or {},
-            "factor_analyst_output": agent_outputs.get("factor_analyst") or {},
-            "strategist_output": agent_outputs.get("strategist") or {},
-            "portfolio_construction_output": (
-                agent_outputs.get("portfolio_construction") or {}
-            ),
-            "backtest_result": backtest_result,
-            "backtest_error": backtest_error,
-            "metrics": metrics,
-            "risk_controller_output": agent_outputs.get("risk_controller") or {},
-            "attribution_analyst_output": (
-                agent_outputs.get("attribution_analyst") or {}
-            ),
-            "anti_overfit_analyst_output": (
-                agent_outputs.get("anti_overfit_analyst") or {}
-            ),
-            "backtest_diagnostics_output": (
-                agent_outputs.get("backtest_diagnostics") or {}
-            ),
-            "decision": decision_obj,
-            "verdict": verdict,
-            "aoa_llm_verdict": (
-                agent_outputs.get("anti_overfit_analyst") or {}
-            ),
-        }
 
     def _emit_topology(
         self,

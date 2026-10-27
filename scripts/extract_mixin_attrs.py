@@ -14,7 +14,6 @@ MIXINS = [
     "src/strategy_research/core/agent/loop_telemetry.py",
     "src/strategy_research/core/study/runner_knowledge.py",
     "src/strategy_research/core/study/runner_aegis.py",
-    "src/strategy_research/core/study/runner_langgraph.py",
 ]
 
 

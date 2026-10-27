@@ -6,8 +6,8 @@ Covers the four breaks found in the audit:
   approved/rejected) → runner poll never saw a decision
 - ownership: respond endpoint did not verify the interrupt belonged to
   the study — global id was a cross-study write primitive
-- B3/B4 are covered in test_resume_round_langgraph.py and
-  test_hitl_resume_rebuild.py.
+- B3/B4 (resume-side propagation) live in test_hitl_resume_rebuild.py
+  and test_hitl_gate_graph.py.
 """
 
 from __future__ import annotations

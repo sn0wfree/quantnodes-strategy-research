@@ -1,10 +1,8 @@
 """Tests for StudyStore round lifecycle — append_round, update_round, review overlay.
 
-These are the DB mirror operations that run_round_phases calls at round end.
-Pre-P0-1, the langgraph path skipped these entirely (state.json never
-advanced, study_rounds DB stayed empty). Post-fix, the langgraph path
-flows through the same finalization, so these operations execute for
-both engines.
+These are the DB mirror operations that run_round_phases calls at round end
+(finalization flows through them for every round; P0-1 fixed the era when
+the langgraph branch skipped them entirely).
 """
 
 from __future__ import annotations

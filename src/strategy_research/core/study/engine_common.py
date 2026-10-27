@@ -1,7 +1,7 @@
 """Shared utilities for study execution engines.
 
 Extracted from runner.py to eliminate duplication across Phase, DAG,
-and LangGraph engines.
+engines. (P5-2: the langgraph study branch is retired.)
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def build_agent_ctx(
 ) -> dict[str, Any]:
     """Build the standard agent context dict.
 
-    Shared across Phase, DAG, and LangGraph engines.
+    Shared across engine branches (phases is the only live one since P5-2).
     """
     return {
         "strategy_name": strategy,
@@ -122,7 +122,7 @@ def save_agent_outputs(
     """Save agent outputs to disk using runner's _save_agent_output.
 
     Unified saving across all engines.  When *agent_histories* is
-    provided (populated by the langgraph engine's on_event adapter),
+    provided,
     the full execution trace is persisted alongside the final answer.
     """
     for agent_id, output in agent_outputs.items():

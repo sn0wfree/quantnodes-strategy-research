@@ -7,8 +7,6 @@ with more detail, and the IDOR isolation check pattern.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from strategy_research.core.study.store import StudyStore
@@ -118,17 +116,6 @@ def test_update_round_heartbeat_updates_timestamp(store):
     # compare 1e-6 smaller. Tolerate that quantization.
     assert hb.timestamp() >= before - 1e-6
     assert ua.timestamp() >= before - 1e-6
-
-
-# ── get_checkpoint_conn ──────────────────────────────────────
-
-
-def test_get_checkpoint_conn_returns_connection(store):
-    """get_checkpoint_conn returns a usable SQLite connection."""
-    conn = store.get_checkpoint_conn()
-    assert conn is not None
-    result = conn.execute("SELECT 1").fetchone()
-    assert result[0] == 1
 
 
 # ── mark_pending_objectives_applied ──────────────────────────

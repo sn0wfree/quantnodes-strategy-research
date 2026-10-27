@@ -24,15 +24,14 @@ logger = logging.getLogger(__name__)
 class RoundOutcome:
     """What each engine branch must hand to the shared finalization.
 
-    Replaces the implicit same-local-name convention between the
-    langgraph / phases branches and the shared finalization. All fields
-    are required — construction fails if a branch omits one — so a
-    branch can no longer shadow or reset a value between capture and
-    consumption (the ``phase_engine:205`` defect fixed in ``261a88f``).
+    Replaces the implicit same-local-name convention between engine
+    branches and the shared finalization. All fields are required —
+    construction fails if a branch omits one — so a branch can no longer
+    shadow or reset a value between capture and consumption (the
+    ``phase_engine:205`` defect fixed in ``261a88f``).
 
     ``eval_result`` is kept as a dict (phases: full ``run_evaluation_phase``
-    result; langgraph: the minimal ``{decision, aoa_llm_verdict}`` face)
-    because ``aegis.verdict_reason`` reads exactly those two keys.
+    result) because ``aegis.verdict_reason`` reads exactly those keys.
     ``exec_result`` is deliberately absent: only the phases branch uses it
     internally; shared finalization never reads it.
     """
@@ -405,7 +404,9 @@ def _resolve_engine(study: Any, round_num: int) -> str:
     langgraph. Both are deprecated — 'dag' has no executor and the env
     switch is ignored. The value passes through unchanged; the dispatcher
     falls back to phases with a warning for anything not in the table
-    (the pre-Step-2 if/else fallback semantics).
+    (the pre-Step-2 if/else fallback semantics). P5-2: the langgraph
+    branch is retired too — legacy ``engine='langgraph'`` rows take the
+    same warning-and-fallback path.
     """
     engine = getattr(study, "engine", None) or "phases"
     logger.info(
@@ -425,90 +426,6 @@ def _resolve_engine(study: Any, round_num: int) -> str:
             round_num,
         )
     return engine
-
-
-def _run_langgraph_branch(ctx: BranchContext) -> RoundOutcome | dict:
-    """Run the round through the langgraph graph engine.
-
-    Returns ``RoundOutcome`` for the shared finalization, or the raw
-    ``lg_result`` dict on the early paths (HITL pause / graph abort) —
-    ``run_round_phases`` detects those via ``isinstance(..., dict)``.
-    """
-    from strategy_research.core.study import state_store as ss  # noqa: F401
-
-    lg_result = ctx.runner._run_round_via_langgraph(
-        ctx.path, ctx.strategy, ctx.current_state, ctx.run_dir, ctx.graph,
-        session=ctx.session, sid=ctx.sid, round_num=ctx.round_num,
-        directive_text=ctx.directive_text,
-    )
-    # HITL approval pause — return early, runner will re-enter on resume
-    if lg_result.get("paused_for_approval"):
-        return lg_result
-    # Novelty gate rejected (graph routed to END before any downstream
-    # agent ran) — return before finalization; the runner loop sees
-    # ``aborted`` and skips the round, mirroring the phases branch.
-    if lg_result.get("aborted"):
-        return lg_result
-
-    # Map langgraph result to the RoundOutcome contract.
-    researcher_output = lg_result.get("researcher_output", {})
-    # Defense: researcher may return a plain string on max_iter —
-    # never let a non-dict reach the .get() calls below.
-    if not isinstance(researcher_output, dict):
-        researcher_output = {}
-    strategist_output = lg_result.get("strategist_output", {})
-    metrics = lg_result.get("metrics", {})
-    verdict = lg_result.get("verdict", "discard")
-    decision = lg_result.get("decision")
-    backtest_error = lg_result.get("backtest_error")
-
-    agent_outputs = {"researcher": researcher_output}
-    for _k in (
-        "data_quality_output", "factor_analyst_output",
-        "strategist_output", "portfolio_construction_output",
-        "risk_controller_output", "attribution_analyst_output",
-        "anti_overfit_analyst_output", "backtest_diagnostics_output",
-    ):
-        if _k in lg_result:
-            agent_outputs[_k] = lg_result[_k]
-
-    hypothesis = researcher_output.get("hypothesis", "")
-    predicted_affected = (
-        researcher_output.get("predicted_affected")
-        or [t["name"] for t in ctx.metric_targets]
-    )
-    # Claims capture: predictions come from the researcher's own
-    # reasoning (they never see the backtest result), so they stay
-    # falsifiable even though this engine runs the backtest in-graph.
-    captured_predictions = _capture_round_claims(
-        ctx.runner, ctx.round_num, researcher_output, predicted_affected,
-        ctx.metric_targets,
-    )
-
-    # Novelty dedup on this branch is handled in-graph by the
-    # novelty_gate node (built when profile.hitl is enabled — the
-    # "langgraph" profile always is, see langgraph_engine profiles).
-    # The graph aborts before any downstream agent runs, and
-    # _run_round_via_langgraph re-attaches ``aborted`` to its result.
-
-    # eval_result keeps the minimal face aegis.verdict_reason reads
-    # (decision + aoa_llm_verdict); exec_result has no shared consumers
-    # so no shim exists. captured_predictions carries the real phase-A
-    # claims — resetting it would starve phase-B backfill (261a88f).
-    return RoundOutcome(
-        metrics=metrics,
-        verdict=verdict,
-        eval_result={
-            "decision": decision,
-            "aoa_llm_verdict": lg_result.get("aoa_llm_verdict"),
-        },
-        agent_outputs=agent_outputs,
-        strategist_output=strategist_output,
-        hypothesis=hypothesis,
-        predicted_affected=predicted_affected,
-        captured_predictions=captured_predictions,
-        backtest_error=backtest_error,
-    )
 
 
 def _run_phases_branch(ctx: BranchContext) -> RoundOutcome | dict:
@@ -548,7 +465,7 @@ def _run_phases_branch(ctx: BranchContext) -> RoundOutcome | dict:
         "phase": "researcher", "status": "done",
     })
     researcher_output = researcher_result["researcher_output"]
-    # Defense: same non-dict guard as the langgraph branch.
+    # Defense: non-dict guard on the researcher output.
     if not isinstance(researcher_output, dict):
         researcher_output = {}
 
@@ -632,8 +549,10 @@ def _run_phases_branch(ctx: BranchContext) -> RoundOutcome | dict:
 
 _ENGINE_BRANCHES: dict[str, Any] = {
     "phases": _run_phases_branch,
-    "langgraph": _run_langgraph_branch,
 }
+# P5-2: the "langgraph" branch is retired — unknown engine values (incl.
+# legacy 'langgraph' rows) warn and fall back to phases in
+# _resolve_branch_fn, which is the single round executor now.
 
 
 # ── Helper functions ──────────────────────────────────────────────

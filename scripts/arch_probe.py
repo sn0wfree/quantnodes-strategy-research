@@ -14,7 +14,6 @@ for m in re.finditer(r'@router\.(get|post|put|delete|patch)\("([^"]+)"', t2):
 # core->api violation details
 for rel in [
     "src/strategy_research/core/agent/event_store.py",
-    "src/strategy_research/core/study/langgraph_engine.py",
     "src/strategy_research/core/study/scheduler.py",
 ]:
     text = Path(rel).read_text(encoding="utf-8")

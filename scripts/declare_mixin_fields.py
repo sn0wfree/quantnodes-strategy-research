@@ -25,7 +25,6 @@ MIXINS = {
     "src/strategy_research/core/agent/loop_telemetry.py": "LoopTelemetryMixin",
     "src/strategy_research/core/study/runner_knowledge.py": "RunnerKnowledgeMixin",
     "src/strategy_research/core/study/runner_aegis.py": "RunnerAegisMixin",
-    "src/strategy_research/core/study/runner_langgraph.py": "RunnerLangGraphMixin",
 }
 
 MARK = "# ── Host surface (provided by AgentLoop / AutoresearchRunner) ──"

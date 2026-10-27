@@ -1,8 +1,9 @@
-"""Tests for phase_engine researcher_output non-dict defense (both branches).
+"""Tests for phase_engine researcher_output non-dict defense.
 
 phase_engine.run_round_phases calls researcher_output.get("hypothesis")
-in two places (langgraph branch + phases branch). Both must tolerate a
-non-dict researcher_output without AttributeError.
+in the phases branch; it must tolerate a non-dict researcher_output
+without AttributeError. (P5-2: the langgraph branch copy was retired
+with the branch.)
 """
 from __future__ import annotations
 
@@ -27,7 +28,6 @@ class TestResearcherOutputDefenseSource(unittest.TestCase):
         preceding isinstance guard assigns researcher_output to a dict."""
         tree = ast.parse(PHASE_ENGINE.read_text(encoding="utf-8"))
         guards = 0
-        get_sites = 0
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue
@@ -38,8 +38,9 @@ class TestResearcherOutputDefenseSource(unittest.TestCase):
                         guards += 1
         src = PHASE_ENGINE.read_text(encoding="utf-8")
         get_sites = src.count("researcher_output.get(")
-        # 2 guarded assignments cover all get sites (langgraph + phases branch)
-        self.assertGreaterEqual(guards, 2, msg=f"expected >=2 guards, found {guards}")
+        # one guarded assignment covers the (single) get site in the
+        # phases branch
+        self.assertGreaterEqual(guards, 1, msg=f"expected >=1 guards, found {guards}")
         self.assertGreater(get_sites, 0)
 
 

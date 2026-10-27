@@ -169,7 +169,7 @@ class StudyRecord:
     executor_type: str  # 'autoresearch' | 'workflow'
     workspace_path: str
     strategy_name: str
-    engine: str = 'phases'  # 'phases' | 'langgraph' ('dag' removed: no executor)
+    engine: str = 'phases'  # 唯一执行体 = 图路径；'langgraph'/'dag' 均退役，脏值回落 phases（warning）
     # HITL novelty 审批门：True = novelty 之后、回测之前暂停等人工审批。
     # 引擎无关（phases/langgraph 都认）；关门 = 现行行为不变。
     hitl: bool = False

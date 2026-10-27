@@ -274,10 +274,12 @@ def test_branch_unknown_engine_fallback(monkeypatch):
     assert _resolve_branch_fn("not_a_real_engine") is run_phases_via_graph
 
 
-def test_langgraph_branch_unaffected_by_flag(monkeypatch):
-    from strategy_research.core.study.phase_engine import _run_langgraph_branch
+def test_langgraph_engine_value_falls_back_to_graph(monkeypatch):
+    """P5-2 退役后：engine='langgraph' 走回落（warning → 图路径），
+    灰度门环境变量不影响解析。"""
+    from strategy_research.core.study.graph_preset import run_phases_via_graph
 
     monkeypatch.setenv("QNODES_RESEARCH_GRAPH", "1")
-    assert _resolve_branch_fn("langgraph") is _run_langgraph_branch
+    assert _resolve_branch_fn("langgraph") is run_phases_via_graph
     monkeypatch.delenv("QNODES_RESEARCH_GRAPH")
-    assert _resolve_branch_fn("langgraph") is _run_langgraph_branch
+    assert _resolve_branch_fn("langgraph") is run_phases_via_graph

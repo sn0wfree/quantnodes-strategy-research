@@ -12,17 +12,10 @@ for p in root.rglob("*.py"):
             frm = re.search(rf"class {sym}\b", t)
             print(f"  {sym:14s} {p.name:24s} 定义={bool(frm)} import自={imp[:2]}")
 
-print("\n════ langgraph 分支的依赖方向")
-p = root / "core/study/langgraph_engine.py"
-t = p.read_text(encoding="utf-8", errors="ignore")
-for i, l in enumerate(t.splitlines(), 1):
-    if l.startswith(("from ", "import ")) and ("phase" in l or "runner" in l or "contract" in l):
-        print(f"  {i}: {l.strip()[:100]}")
-
-print("\n════ phase_engine 里两个分支的入口")
+print("\n════ phase_engine 的入口")
 p = root / "core/study/phase_engine.py"
 t = p.read_text(encoding="utf-8", errors="ignore")
-for name in ("_run_langgraph_branch", "_run_phases_branch", "_prepare_round_preamble", "_resolve_engine"):
+for name in ("_run_phases_branch", "_prepare_round_preamble", "_resolve_engine"):
     i = t.find(f"def {name}")
     if i > 0:
         seg = t[i : i + 420]
