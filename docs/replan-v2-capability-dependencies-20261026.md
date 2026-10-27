@@ -59,7 +59,7 @@ study 门在 **B1 完成后**翻默认开。
 | ✅ 3b-3 | 双门灰度 + engine_factory 升级 | 3a, 3b-1 | 0.5d | 19 测试 |
 | **3b-4** | blob/artifact 通道（next） | 3b-1 | 0.5d | 登记行可写可查 |
 | **3b-2** | SSE 单轨（延后） | 3b-1 | 1d | test_sse_* 全绿 |
-| **B1-a** | **GraphEngine 支持阶段图**（多节点 + 条件边 + 中断） | 1b | 2d | 跑通一个两阶段图 |
+| ✅ B1-a | **GraphEngine 支持阶段图**（多节点 + 条件边 + 中断） | 1b | 2d | 两阶段图（gen→judge 环）跑通；设计见 `stage-b1a-graph-engine-design-20261027.md` |
 | **B1-b** | **research preset**（phase_engine → 图数据） | B1-a | 3d | study 走新路径能真正执行轮次 |
 | **3c** | **scheduler / automation 入口迁移** | B1-b | 1d | study 门翻默认开 |
 | **4** | 清理（ContextHub + 调度归一 + 反向依赖 + 测试隔离 + 门禁） | 3c | 7d | 净删 2000+ 行；审计门② |
@@ -88,9 +88,9 @@ study 门在 **B1 完成后**翻默认开。
 
 ## 7. 待办
 
-1. [ ] 3b-4：blob/artifact 通道
+1. [x] 3b-4：blob/artifact 通道
 2. [ ] 3b-2：SSE 单轨
-3. [ ] B1-a：GraphEngine 多节点 + 条件边
+3. [x] B1-a：GraphEngine 多节点 + 条件边 + 协作中断（`stage-b1a-graph-engine-design-20261027.md`）
 4. [ ] B1-b：research preset
 5. [ ] 3c：scheduler 迁移（study 门翻默认开）
 
