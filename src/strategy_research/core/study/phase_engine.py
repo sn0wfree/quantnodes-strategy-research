@@ -114,17 +114,7 @@ def run_round_phases(
 
     # ── Engine dispatch ──────────────────────────────────────
     engine = _resolve_engine(study, round_num)
-    branch_fn = _ENGINE_BRANCHES.get(engine)
-    if branch_fn is None:
-        # Preserve the historical fallback: any unknown engine value
-        # (dirty DB row, future removal of 'dag') runs phases instead
-        # of raising mid-round.
-        logger.warning(
-            "phase_engine: unknown engine %r (study.engine=%r); "
-            "falling back to phases",
-            engine, getattr(study, "engine", "NOT_SET"),
-        )
-        branch_fn = _ENGINE_BRANCHES["phases"]
+    branch_fn = _resolve_branch_fn(engine)
     branch_result = branch_fn(ctx)
     if isinstance(branch_result, dict):
         # Early path: HITL pause / graph abort / novelty rejection —
@@ -379,6 +369,35 @@ def _prepare_round_preamble(
         metric_targets=metric_targets, guidance=guidance,
     )
     return ctx, state, inherited_from
+
+
+def _resolve_branch_fn(engine: str) -> Any:
+    """Resolve a normalized engine value to its branch function.
+
+    Fallback: unknown values (dirty DB row, future removal of 'dag') run
+    phases instead of raising mid-round — the historical semantics.
+
+    B1-b greyscale: when ``research_graph_enabled()`` is on, the phases
+    branch is served by the GraphEngine stage graph (``graph_preset``)
+    instead of the legacy function sequence. Output contract is identical
+    (see docs/stage-b1b-research-preset-design-20261027.md §4).
+    """
+    branch_fn = _ENGINE_BRANCHES.get(engine)
+    if branch_fn is None:
+        logger.warning(
+            "phase_engine: unknown engine %r (study.engine=%r); "
+            "falling back to phases",
+            engine, engine,
+        )
+        branch_fn = _ENGINE_BRANCHES["phases"]
+    if branch_fn is _run_phases_branch:
+        from strategy_research.core.gateway import research_graph_enabled
+
+        if research_graph_enabled():
+            from .graph_preset import run_phases_via_graph
+
+            return run_phases_via_graph
+    return branch_fn
 
 
 def _resolve_engine(study: Any, round_num: int) -> str:

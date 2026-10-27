@@ -46,6 +46,17 @@ def study_entry_enabled() -> bool:
     return value in ("1", "true", "yes", "on")
 
 
+def research_graph_enabled() -> bool:
+    """phases 引擎分支是否走 GraphEngine 阶段图（B1-b 灰度，**默认关闭**）。
+
+    这是「引擎路径」门，与两个入口门正交：入口门管「请求从哪进来」，
+    这个门管「phases 分支内部用旧函数序还是阶段图」。
+    启用方式：QNODES_RESEARCH_GRAPH=1（3c 验证后翻默认）。
+    """
+    value = os.environ.get("QNODES_RESEARCH_GRAPH", "").strip().lower()
+    return value in ("1", "true", "yes", "on")
+
+
 def api_chat_request(session_id: str, content: str) -> WorkRequest:
     """把 API chat 请求翻译成 WorkRequest。
 
