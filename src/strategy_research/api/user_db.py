@@ -9,12 +9,15 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class UserDB:
@@ -217,15 +220,57 @@ def hash_password(password: str) -> str:
 
 
 def seed_admin_if_empty(db: UserDB) -> None:
-    """Insert admin/admin if the users table is empty.
+    """Insert the first admin account if the users table is empty.
 
     This runs on every startup. It's idempotent — only inserts if count == 0.
     The seeded admin account is a superuser (role='admin').
+
+    SEC-4 (P5-5④): the seed password is no longer the known constant
+    ``admin``. Resolution order:
+        1. ``SR_ADMIN_PASSWORD`` env (ops/tests opt-in to a known value);
+        2. otherwise a random ``secrets.token_urlsafe`` password, persisted
+           once to ``~/.quantnodes/admin_password.txt`` (0600 where
+           supported) and logged once at first start — the standard
+           initial-admin-password pattern (Jenkins/Grafana).
+
+    Existing deployments with a seeded admin are untouched (count > 0
+    short-circuits before any password logic).
     """
-    if db.user_count() == 0:
-        db.create_user(
-            username="admin",
-            display_name="Admin",
-            password_hash=hash_password("admin"),
-            role="admin",
+    if db.user_count() > 0:
+        return
+    import os as _os
+    password = _os.environ.get("SR_ADMIN_PASSWORD", "")
+    if password:
+        source = "SR_ADMIN_PASSWORD"
+    else:
+        import secrets as _secrets
+        password = _secrets.token_urlsafe(18)
+        source = "generated"
+        _persist_admin_password(password)
+    db.create_user(
+        username="admin",
+        display_name="Admin",
+        password_hash=hash_password(password),
+        role="admin",
+    )
+    if source == "generated":
+        logger.warning(
+            "SEC-4: first-start admin account created with a RANDOM "
+            "password — retrieve it from ~/.quantnodes/admin_password.txt "
+            "(it is not 'admin'; change it after first login). Set "
+            "SR_ADMIN_PASSWORD to control the seed explicitly.",
         )
+
+
+def _persist_admin_password(password: str) -> None:
+    """Best-effort one-time persistence of the generated seed password."""
+    try:
+        pw_file = Path.home() / ".quantnodes" / "admin_password.txt"
+        pw_file.parent.mkdir(parents=True, exist_ok=True)
+        pw_file.write_text(password + "\n", encoding="utf-8")
+        try:
+            pw_file.chmod(0o600)
+        except OSError:
+            pass  # POSIX perms unavailable (Windows) — best effort
+    except OSError:
+        logger.warning("could not persist admin seed password file")

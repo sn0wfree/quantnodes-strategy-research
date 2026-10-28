@@ -136,6 +136,18 @@ def _purge_llm_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _admin_seed_password(monkeypatch):
+    """Tests opt in to the known seed password ``admin`` (SEC-4).
+
+    Production seeds a RANDOM admin password on first start (user_db.
+    seed_admin_if_empty); without this fixture the 12+ suites that log in
+    as admin/admin would break. Declaring it here keeps that dependency
+    explicit and host runs unaffected.
+    """
+    monkeypatch.setenv("SR_ADMIN_PASSWORD", "admin")
+
+
+@pytest.fixture(autouse=True)
 def _purge_hypothesis_sqlite_env(monkeypatch):
     """Keep tests in JSON mode unless they explicitly opt into SQLite.
 
