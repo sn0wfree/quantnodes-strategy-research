@@ -41,14 +41,25 @@ class SessionController:
         engine_factory: Callable[[], GraphEngine] | None = None,
         registry: Any | None = None,
         stream: bool = False,
+        max_iterations: int = 1,
+        role: str = "chat",
+        workspace: Any | None = None,
+        extra_context: dict[str, Any] | None = None,
+        context_hub: Any | None = None,
     ) -> None:
         self._ep = entry_point
         self._client = client
-        self._system = system
+        self._system = system  # 显式 system：跳过装配核（等价于 override）
         self._sink = sink or (lambda kind, data: None)
         self._engine_factory = engine_factory  # None = 默认图（react 或 llm）
         self._registry = registry
         self._stream = stream
+        self._max_iterations = max_iterations
+        # B1-a/b：与 AgentLoop 路径共享的装配输入（同一渲染核、同一上下文源）
+        self._role = role
+        self._workspace = workspace
+        self._extra_context = extra_context
+        self._context_hub = context_hub
         self._turn_counters: dict[str, int] = {}  # session_id -> 已发 turn 数
 
     # ── 驱动 ─────────────────────────────────────────────
@@ -92,6 +103,9 @@ class SessionController:
                 if isinstance(m, dict) and m.get("role") and "content" in m
             )
         messages.append({"role": "user", "content": _payload_text(request)})
+        # B1-b：pre-run 上下文（goal/memory）经 ContextHub 注入——与
+        # AgentLoop 路径同一契约（块在前、当前输入在后）。
+        messages = self._inject_context(messages, session_id)
         state = {
             "messages": messages,
             "session_id": session_id,
@@ -117,10 +131,15 @@ class SessionController:
 
         P5-1b：有 registry 时用 react 节点（无工具调用时退化为单次 LLM 调用，
         有工具时自动进入循环）；否则退化为纯 llm 节点。
+
+        B1-a：系统提示经 ``assemble_loop_parts`` 统一渲染——与
+        ``build_chat_agent_loop`` 同一实现，保证 chat 两条路径的 prompt
+        逐字节一致。
         """
         if self._engine_factory is not None:
             return self._engine_factory()
 
+        system = self._resolve_system_prompt()
         engine = GraphEngine(sink=self._sink)
         if self._registry is not None:
             from strategy_research.core.runtimes.nodes.react import (
@@ -132,7 +151,11 @@ class SessionController:
                 "react",
                 make_react_node(
                     self._client, self._registry, sink=self._sink,
-                    config=ReactConfig(system=self._system, stream=self._stream),
+                    config=ReactConfig(
+                        system=system,
+                        stream=self._stream,
+                        max_iterations=self._max_iterations,
+                    ),
                 ),
             )
         else:
@@ -141,11 +164,76 @@ class SessionController:
             engine.add_node(
                 "llm",
                 make_llm_node(
-                    self._client, system=self._system,
+                    self._client, system=system,
                     stream=self._stream, sink=self._sink,
                 ),
             )
         return engine
+
+    def _resolve_system_prompt(self) -> str | None:
+        """Render the system prompt via the shared assembly core.
+
+        ``self._system`` is an explicit override (wins, matching
+        ``assemble_loop_parts(system_prompt_override=...)``).
+
+        Without an explicit system AND without a registry there is nothing
+        to assemble from — return None so the llm-node path stays
+        prompt-free (existing contract: ``test_session_controller``
+        asserts no system message is invented). The assembly core is
+        engaged only for the react path (registry present), where the
+        AgentLoop chat path would also have rendered a role prompt.
+        """
+        if self._system is not None:
+            return self._system
+        if self._registry is None:
+            return None
+        try:
+            from strategy_research.core.agent.loop_assembly import (
+                assemble_loop_parts,
+            )
+
+            assembly = assemble_loop_parts(
+                role=self._role,
+                registry=self._registry,
+                extra_context=self._extra_context,
+                workspace=self._workspace,
+            )
+            return assembly.system_prompt
+        except Exception as exc:  # noqa: BLE001 — 渲染失败不阻断 chat
+            self._sink("system_prompt.render_failed", {"error": str(exc)})
+            return None
+
+    def _inject_context(self, messages: list[dict], session_id: str) -> list[dict]:
+        """B1-b: prepend hub-collected context items (goal/memory) to the turn.
+
+        Uses the same ContextHub contract as the AgentLoop path (P5-4):
+        items are rendered as a single leading user block, matching the
+        legacy ``full_task = blocks + "\\n\\n" + task`` shape. No hub
+        registered → passthrough (test/sync paths).
+        """
+        if self._context_hub is None or not messages:
+            return messages
+        try:
+            from strategy_research.core.context.protocol import ContextQuery
+
+            last = messages[-1]
+            if last.get("role") != "user":
+                return messages
+            bundle = self._context_hub.build(
+                ContextQuery(
+                    task_text=str(last.get("content") or ""),
+                    session_id=session_id,
+                ),
+            )
+            if not bundle.items:
+                return messages
+            prefix = "\n\n".join(item.content for item in bundle.items)
+            return messages[:-1] + [
+                {**last, "content": prefix + "\n\n" + str(last.get("content") or "")},
+            ]
+        except Exception as exc:  # noqa: BLE001 — 上下文失败不阻断 chat
+            self._sink("context.inject_failed", {"error": str(exc)})
+            return messages
 
 
 def _payload_text(request: WorkRequest) -> str:
