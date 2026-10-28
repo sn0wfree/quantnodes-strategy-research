@@ -3,8 +3,9 @@
 Covers:
 - _try_parse_json: JSON parsing + fallback for non-string / non-JSON
 - _build_round_task_text: section composition
-- _rebuild_phase_outputs: legacy schema translation (researcher,
-  backtest, decide) with backtest-as-string and missing-node branches
+
+(_rebuild_phase_outputs was retired with the langgraph branch in P5-2;
+its suite was removed alongside the method.)
 
 These are pure functions / pure data transforms — exercised via
 ``AutoresearchRunner.__new__`` to bypass the heavyweight __init__.

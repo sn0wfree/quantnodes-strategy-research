@@ -1,7 +1,37 @@
-# A1 测试分道与基线修复 — 计划 — 2026-10-28
+# A1 测试分道与基线修复 — 计划 + 执行记录 — 2026-10-28
 
 > 依据：`project-status-and-roadmap-20261028.md` §4 实测基线 +
-> 本轮三方 commit 对比（`33548a2a` P5-2 前 / `616085ee` 安全前 / `3973a8bf` 当前）。
+> 本轮三方 commit 对比（`33548a2a` P5-2 前 / `616085ee` 安全前 / 当前）。
+
+## 0. 执行结果（2026-10-28 已完成）
+
+| 步骤 | 结果 |
+|---|---|
+| 步骤 1 分道补全 | ✅ 5 个 e2e 套件入 `_LANE_E2E_FILES`；PR 道收集 9862 → **9814**；`timeout = 180` 全局兜底 |
+| 步骤 2 我方回归 | ✅ `TestRebuildPhaseOutputs` 死测试删除（`ea2f3563`） |
+| 步骤 3a posix skip | ✅ `test_shell_tool` 6 失败 → 9 skipped（四类 POSIX 命令套件） |
+| 步骤 3b compact patch | ✅ 13 失败 → **0**（并修出一个真产品 bug，见 §6） |
+| 步骤 3c persister | ✅ `test_route_agent_event_*` 11 失败 → **0**（同源于 §6 的导入绑定 bug） |
+
+**四族合计：30 个失败 → 0**（提交 `e75cc4c7`），验证 50 passed / 9 skipped。
+
+## 6. 执行中发现的真产品 bug（重要）
+
+`loop_compaction.py` 有两处 **from-import 绑定陷阱**：
+
+```python
+from .loop import _compaction_persister   # 绑定 None（模块加载时的值）
+from .compact import compact_messages     # 测试 patch 不到真实调用点
+```
+
+后果：`register_compaction_persister()` 之后注册的回调**永远不会生效**，
+压缩持久化路径在任何「注册晚于 import」的部署里都会抛
+`compaction_persister not registered`——生产路径同样中招，不只是测试。
+
+修法：改为模块引用（`_loop_mod._compaction_persister` /
+`_compact_mod.compact_messages`），调用时动态取值。
+
+**这是本轮最有价值的产出**：13 个测试失败背后藏着一个真实的运行时缺陷。
 
 ## 1. 调查结论（推翻此前的「127 个全部预存」）
 
