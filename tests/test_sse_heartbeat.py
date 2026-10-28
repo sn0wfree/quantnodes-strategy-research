@@ -34,41 +34,16 @@ def test_heartbeat_count_argument_ignored():
 
 @pytest.mark.asyncio
 async def test_event_generator_yields_connected_first():
-    """event_generator must yield ': connected\\n\\n' as its first
+    """The SSE generator must yield ': connected\\n\\n' as its first
     chunk so FastAPI flushes response headers and the browser fires
-    onopen without waiting for the first real event or the 15s
-    heartbeat."""
-    from unittest.mock import MagicMock, patch
+    onopen without waiting for the first real event or a heartbeat.
 
-    from fastapi import Request
+    A2: the generator is now ``_event_generator_v2`` (EventStore
+    subscribe track) — the immediate-flush contract is unchanged.
+    """
+    from strategy_research.api.routers.chat import _event_generator_v2
 
-    # Build a minimal request with a unique session id so register_session
-    # returns a fresh asyncio.Event.
-    mock_request = MagicMock(spec=Request)
-    session_id = "test-sse-immediate-flush"
-
-    # Patch out sse_buffer so the test doesn't need a real backend.
-    fake_buffer = MagicMock()
-    fake_buffer.register_session.return_value = MagicMock()
-    fake_buffer.get_events_since.return_value = []
-    fake_buffer.replay_from.return_value = []
-
-    with patch("strategy_research.api.routers.chat.sse_buffer", fake_buffer), \
-            patch("strategy_research.api.routers.web_session._fetch_session_owned") as _:
-        # Import inside the patch so the route module picks up the
-        # mocked sse_buffer.
-        from strategy_research.api.routers.chat import chat_events
-
-        # Call the endpoint function directly. It returns a StreamingResponse
-        # whose body is the event_generator coroutine.
-        response = await chat_events(
-            session_id=session_id,
-            token=None,
-            last_event_id=None,
-            request=mock_request,
-        )
-
-        # Drain the generator — it must yield the comment line first.
-        body_iter = response.body_iterator
-        first_chunk = await body_iter.__anext__()
-        assert first_chunk == ": connected\n\n"
+    gen = _event_generator_v2("test-sse-immediate-flush", "")
+    first_chunk = await gen.__anext__()
+    assert first_chunk == ": connected\n\n"
+    await gen.aclose()

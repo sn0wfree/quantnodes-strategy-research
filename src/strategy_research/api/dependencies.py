@@ -70,10 +70,9 @@ def get_event_store(request: Request) -> "EventStore":
 
     store = getattr(request.app.state, _STATE_KEY_EVENT_STORE, None)
     if store is None:
-        from .session.bridge_v2 import attach_eventstore_to_sse
-
+        # A2: single SSE track — the events endpoint subscribes to this
+        # store directly, so no bridge is needed.
         store = EventStore(db_path=get_db_path(request), flush_to_messages=True)
-        attach_eventstore_to_sse(store)
         setattr(request.app.state, _STATE_KEY_EVENT_STORE, store)
     return store
 

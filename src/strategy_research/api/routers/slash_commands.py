@@ -37,7 +37,7 @@ async def _handle_goal_command(body: ChatMessage) -> SendMessageResponse:
     """Handle /goal slash commands without going through AgentLoop.
 
     B5: All persistence via EventStore → projector.flush(). No direct
-    persist_message / sse_buffer.push calls.
+    persist_message / SSE push calls.
     """
     from ...core.goal import GoalStore
 

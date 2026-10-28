@@ -63,67 +63,6 @@ class TestAuth:
         assert res.status_code == 401
 
 
-class TestSSEBuffer:
-    def test_push_and_replay(self):
-        from strategy_research.api.sse_buffer import SSEEventBuffer
-        buf = SSEEventBuffer(max_events=100, ttl_seconds=300)
-
-        eid1 = buf.push("text_delta", '{"delta":"hello"}', "sess1")
-        eid2 = buf.push("text_delta", '{"delta":" world"}', "sess1")
-        eid3 = buf.push("text_delta", '{"delta":"!"}', "sess1")
-
-        # Replay from eid1 → should get eid2 and eid3
-        events = buf.replay_from(eid1, "sess1")
-        assert len(events) == 2
-        assert events[0].id == eid2
-        assert events[1].id == eid3
-
-    def test_replay_from_unknown_id(self):
-        from strategy_research.api.sse_buffer import SSEEventBuffer
-        buf = SSEEventBuffer()
-
-        buf.push("text_delta", '{"delta":"a"}', "sess1")
-        buf.push("text_delta", '{"delta":"b"}', "sess1")
-
-        # Unknown ID (evicted) → falls back to recent events for the
-        # session so SSE reconnect never loses the latest state
-        events = buf.replay_from("evt_999", "sess1")
-        assert len(events) == 2
-        assert [e.id for e in events] == ["evt_1", "evt_2"]
-
-    def test_session_isolation(self):
-        from strategy_research.api.sse_buffer import SSEEventBuffer
-        buf = SSEEventBuffer()
-
-        buf.push("text_delta", '{"delta":"a"}', "sess1")
-        buf.push("text_delta", '{"delta":"b"}', "sess2")
-
-        # Replay sess1 should not include sess2 events
-        events = buf.replay_from("evt_1", "sess1")
-        assert all(e.session_id == "sess1" for e in events)
-
-    def test_max_events(self):
-        from strategy_research.api.sse_buffer import SSEEventBuffer
-        buf = SSEEventBuffer(max_events=5)
-
-        for i in range(10):
-            buf.push("text_delta", f'{{"delta":"{i}"}}', "sess1")
-
-        # Only last 5 events should be in buffer
-        with buf._lock:
-            assert len(buf._buffer) == 5
-
-    def test_async_notification(self):
-        from strategy_research.api.sse_buffer import SSEEventBuffer
-        buf = SSEEventBuffer()
-
-        evt = buf.register_session("sess1")
-        assert not evt.is_set()
-
-        buf.push("text_delta", '{"delta":"hello"}', "sess1")
-        assert evt.is_set()
-
-        buf.unregister_session("sess1", evt)
 
 
 class TestWebSession:

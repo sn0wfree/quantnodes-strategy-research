@@ -82,7 +82,6 @@ def build_container(
     """
     from ..core.agent.event_store import EventStore
     from ..core.agent.memory_manager import resolve_session_db_path
-    from .session.bridge_v2 import attach_eventstore_to_sse
     from .session.service import SessionService
     from .session.store import SessionStore
 
@@ -93,9 +92,8 @@ def build_container(
     # Construct services in dependency order
     session_store = (session_store_factory or SessionStore)(db_path)
     event_store = (event_store_factory or (lambda p: EventStore(p, flush_to_messages=True)))(db_path)
-    # SSE bridge (idempotent — guarded per instance)
-    if not getattr(event_store, "_sse_bridge_attached", False):
-        attach_eventstore_to_sse(event_store)
+    # A2: no SSE bridge — /api/chat/events subscribes to the event store
+    # directly (single track).
     session_service = (session_service_factory or SessionService)(session_store, event_store)
 
     return AppContainer(

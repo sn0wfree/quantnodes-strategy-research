@@ -28,7 +28,6 @@ from ..schemas.chat import (
 )
 from ..session.models import AttemptId, SessionId
 from ..session.service import SessionService
-from ..sse_buffer import sse_buffer
 from .slash_commands import (
     _handle_clear_command,
     _handle_compact_command,
@@ -92,9 +91,7 @@ def _get_permission_gateway(request: Request | None = None) -> "PermissionGatewa
         return gateway
 
     def _push_sse(tool_call_id, decision, args):
-        # Lazy import — sse_buffer is a heavy module.
         try:
-            from ...api.sse_buffer import sse_buffer  # local import
             from ...core.events.event_v2 import EventType
 
             session_id = args.get("__session_id__") or ""
@@ -107,7 +104,6 @@ def _get_permission_gateway(request: Request | None = None) -> "PermissionGatewa
                 return
             # Tool name is implicit from the EventType subscriber;
             # payload carries call_id + args for the dialog UI.
-            import json as _json
             payload = {
                 "tool_call_id": tool_call_id,
                 "tool_name": args.get("__tool_name__", ""),
@@ -115,11 +111,7 @@ def _get_permission_gateway(request: Request | None = None) -> "PermissionGatewa
                 "pattern": decision.pattern,
                 "target": decision.target,
             }
-            sse_buffer.push(
-                EventType.PERMISSION_REQUEST,
-                _json.dumps(payload, ensure_ascii=False),
-                session_id,
-            )
+            _push_event(session_id, EventType.PERMISSION_REQUEST, payload)
         except Exception as exc:  # noqa: BLE001
             logger.warning("permission SSE push failed: %s", exc)
 
@@ -139,6 +131,32 @@ def _safe_payload(args: dict) -> dict:
         s = repr(v)
         out[k] = s[:200] + "…" if len(s) > 200 else v
     return out
+
+
+def _push_event(session_id: str, event_type: str, data: Any) -> None:
+    """A2: emit an SSE-visible event through the single EventStore track.
+
+    Replaces the retired ``legacy in-process SSE push``
+    calls. The event store persists it (event_log), feeds live
+    subscribers (``/api/chat/events`` via ``subscribe()``) and — when
+    configured — projects it into messages. Payloads that were already
+    JSON strings on the old track are accepted for a mechanical
+    migration; dicts are preferred.
+
+    Never raises: SSE visibility must not break the request path.
+    """
+    try:
+        payload: Any = data
+        if isinstance(data, str):
+            try:
+                payload = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                payload = {"raw": data}
+        if not isinstance(payload, dict):
+            payload = {"value": payload}
+        _get_session_service().event_bus.emit(session_id, event_type, payload)
+    except Exception as exc:  # noqa: BLE001 — best effort by design
+        logger.warning("[SSE] emit %s failed session=%s: %s", event_type, session_id, exc)
 
 
 def _get_session_service() -> SessionService:
@@ -213,11 +231,7 @@ class _PartAccumulator:
 
     def handle(self, event_type: str, data: dict) -> None:
         event_data = {**data, "message_id": self._message_id}
-        sse_buffer.push(
-            event_type,
-            json.dumps(event_data, ensure_ascii=False),
-            self._session_id,
-        )
+        _push_event(self._session_id, event_type, json.dumps(event_data, ensure_ascii=False))
         self._route(event_type, event_data)
 
     def _route(self, event_type: str, data: dict) -> None:
@@ -330,11 +344,7 @@ def _auto_title_and_notify(session_id: str, task: str) -> None:
             "tags": json.loads(row["tags_json"]) if row and row["tags_json"] else [],
             "archived": bool(row["archived"]) if row else False,
         }
-        sse_buffer.push(
-            "session_meta_updated",
-            json.dumps(meta_update, ensure_ascii=False),
-            session_id,
-        )
+        _push_event(session_id, "session_meta_updated", json.dumps(meta_update, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001 — best-effort SSE emit
         logger.warning("Failed to emit session_meta_updated: %s", exc)
 
@@ -363,39 +373,23 @@ def _persist_assistant_message(
 async def _emit_config_error(session_id: str, message_id: str) -> None:
     """Emit SSE error events when LLM is not configured."""
     err_data = {"message_id": message_id, "error": "LLM 未配置。请设置 OPENAI_API_KEY 环境变量。"}
-    sse_buffer.push("error", json.dumps(err_data), session_id)
-    sse_buffer.push(
-        "agent_done",
-        json.dumps({"message_id": message_id, "status": "error"}),
-        session_id,
-    )
+    _push_event(session_id, "error", json.dumps(err_data))
+    _push_event(session_id, "agent_done", json.dumps({"message_id": message_id, "status": "error"}))
 
 
 def _emit_agent_done(session_id: str, message_id: str, answer: str | None) -> None:
     """Emit agent_done SSE event."""
-    sse_buffer.push(
-        "agent_done",
-        json.dumps({
+    _push_event(session_id, "agent_done", json.dumps({
             "message_id": message_id,
             "status": "success" if answer else "empty",
             "answer_length": len(answer) if answer else 0,
-        }),
-        session_id,
-    )
+        }))
 
 
 async def _emit_agent_error(session_id: str, message_id: str, exc: Exception) -> None:
     """Emit error + agent_done SSE events on AgentLoop failure."""
-    sse_buffer.push(
-        "error",
-        json.dumps({"message_id": message_id, "error": str(exc)}),
-        session_id,
-    )
-    sse_buffer.push(
-        "agent_done",
-        json.dumps({"message_id": message_id, "status": "error"}),
-        session_id,
-    )
+    _push_event(session_id, "error", json.dumps({"message_id": message_id, "error": str(exc)}))
+    _push_event(session_id, "agent_done", json.dumps({"message_id": message_id, "status": "error"}))
 
 
 async def _run_agent_loop_background(
@@ -498,58 +492,34 @@ async def _run_test_script(
         accumulated_parts = []
     try:
         # Phase 1: thinking block (collapsed by default)
-        sse_buffer.push(
-            "thinking_start",
-            json.dumps({"message_id": message_id}, ensure_ascii=False),
-            session_id,
-        )
+        _push_event(session_id, "thinking_start", json.dumps({"message_id": message_id}, ensure_ascii=False))
         thinking_chunks = ["分析用户问题", " → 检索相关策略", " → 准备回复"]
         thinking_text = "".join(thinking_chunks)
         accumulated_parts.append({"type": "thinking", "text": thinking_text, "status": "streaming"})
         for chunk in thinking_chunks:
             await asyncio.sleep(0.03)
-            sse_buffer.push(
-                "thinking_delta",
-                json.dumps({"message_id": message_id, "delta": chunk}, ensure_ascii=False),
-                session_id,
-            )
+            _push_event(session_id, "thinking_delta", json.dumps({"message_id": message_id, "delta": chunk}, ensure_ascii=False))
         # Mark thinking done
         if accumulated_parts and accumulated_parts[-1].get("type") == "thinking":
             accumulated_parts[-1]["status"] = "done"
-        sse_buffer.push(
-            "thinking_done",
-            json.dumps({"message_id": message_id}, ensure_ascii=False),
-            session_id,
-        )
+        _push_event(session_id, "thinking_done", json.dumps({"message_id": message_id}, ensure_ascii=False))
 
         # Phase 2: streaming text reply — accumulate as single text part
         full_text = "".join(reply_parts)
         accumulated_parts.append({"type": "text", "text": full_text})
         for part in reply_parts:
             await asyncio.sleep(0.03)
-            sse_buffer.push(
-                "text_delta",
-                json.dumps({"message_id": message_id, "text": part}, ensure_ascii=False),
-                session_id,
-            )
+            _push_event(session_id, "text_delta", json.dumps({"message_id": message_id, "text": part}, ensure_ascii=False))
 
         # Phase 3: completion signal
-        sse_buffer.push(
-            "agent_done",
-            json.dumps({
-                "message_id": message_id,
-                "status": "success",
-                "answer_length": sum(len(p) for p in reply_parts),
-            }, ensure_ascii=False),
-            session_id,
-        )
+        _push_event(session_id, "agent_done", {
+            "message_id": message_id,
+            "status": "success",
+            "answer_length": sum(len(p) for p in reply_parts),
+        })
     except asyncio.CancelledError:
         # Test cancellation handling matches production
-        sse_buffer.push(
-            "agent_done",
-            json.dumps({"message_id": message_id, "status": "cancelled"}, ensure_ascii=False),
-            session_id,
-        )
+        _push_event(session_id, "agent_done", json.dumps({"message_id": message_id, "status": "cancelled"}, ensure_ascii=False))
         raise
 
 
@@ -814,7 +784,7 @@ async def _send_via_gateway(session_id: str, content: str) -> dict:
 def _push_sse(kind: str, data: dict, session_id: str) -> None:
     """把一条事件推入 SSE 缓冲（失败只记日志，不影响主路径）。"""
     try:
-        sse_buffer.push(kind, json.dumps(data, ensure_ascii=False), session_id)
+        _push_event(session_id, kind, json.dumps(data, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001
         logger.debug("sse push failed (%s): %s", kind, exc)
 
@@ -934,10 +904,12 @@ async def chat_events(
     resolved_last_event_id = last_event_id or last_event_id_query or ""
     logger.info("[SSE] client connected session=%s last_event_id=%s", session_id, resolved_last_event_id)
 
-    notification_event = sse_buffer.register_session(session_id)
-
+    # A2: single track — EventStore.subscribe() (replay + live). The old
+    # legacy in-process SSE buffer was retired; its ring-buffer
+    # semantics (5min / 10k) are strictly weaker than the event store's
+    # persistent log.
     return StreamingResponse(
-        _event_generator(session_id, resolved_last_event_id, notification_event),
+        _event_generator_v2(session_id, resolved_last_event_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1064,7 +1036,6 @@ async def get_session_trace(
     """
     from ...core.agent.trace import TraceWriter
     from ..session.trace_projection import TraceProjection
-
     from .web_session import _fetch_session_owned, _get_db
     user_id = getattr(request.state, "user_id", "anonymous")
     _fetch_session_owned(_get_db(), session_id, user_id)
@@ -1147,81 +1118,75 @@ async def list_personas(request: Request = None):
     return {"personas": personas}
 
 
-async def _event_generator(
+async def _event_generator_v2(
     session_id: str,
     last_id: str,
-    notification_event: Any,
 ):
-    """SSE event generator: replay missed events then stream live."""
-    logger.info("[SSE] generator started session=%s", session_id)
+    """SSE generator backed by the single EventStore track (A2).
+
+    Replaces the legacy in-process buffer track: ``EventStore.subscribe()`` already
+    provides cache replay -> SQLite tail replay -> live queue, which is a
+    superset of the old ring buffer (persistent across restarts, not
+    limited to 5 minutes / 10k events).
+
+    ``last_id`` accepts both forms the frontend may echo back: the legacy
+    ``evt_<n>`` string (ignored — EventSource just replays what the event
+    store has) and the EventV2 UUID (used for Last-Event-ID recovery).
+    """
+    logger.info("[SSE] generator (v2) started session=%s", session_id)
     yield ": connected\n\n"
     yield "retry: 3000\n\n"
 
+    store = _get_session_service().event_store
     event_count = 0
+    emitted_id = ""
     try:
-        last_id, event_count, replay_lines = await _replay_missed(last_id, session_id, event_count)
-        for line in replay_lines:
-            yield line
-        while True:
-            try:
-                await asyncio.wait_for(notification_event.wait(), timeout=15.0)
-            except asyncio.TimeoutError:
-                event_count += 1
-                yield _heartbeat_sse(event_count)
-                if event_count % 4 == 0:
-                    logger.debug("[SSE] heartbeat #%d session=%s", event_count, session_id)
+        async for event in store.subscribe(session_id):
+            # Last-Event-ID recovery: skip everything up to and including
+            # the id the client already saw.
+            if last_id and event.id != last_id and not emitted_id:
+                continue
+            if last_id and event.id == last_id:
+                emitted_id = last_id
                 continue
 
-            notification_event.clear()
-            new_events = sse_buffer.get_events_since(session_id, last_id)
-            for evt in new_events:
-                yield _format_sse(evt)
-                last_id = evt.id
-                event_count += 1
-                if evt.event:
-                    logger.debug("[SSE] event=%s session=%s id=%s", evt.event, session_id, evt.id)
+            yield _format_event_v2(event)
+            emitted_id = event.id
+            event_count += 1
+            if event_count % 4 == 0:
+                yield _heartbeat_sse(event_count)
     except asyncio.CancelledError:
-        logger.info("[SSE] client disconnected session=%s reason=cancelled events=%d", session_id, event_count)
+        logger.info("[SSE] client disconnected session=%s events=%d",
+                    session_id, event_count)
     except Exception as exc:  # noqa: BLE001 — defensive catch-and-raise
-        logger.error("[SSE] generator error session=%s: %s", session_id, exc)
+        logger.error("[SSE] generator (v2) error session=%s: %s", session_id, exc)
         raise
     finally:
-        sse_buffer.unregister_session(session_id, notification_event)
-        logger.info("[SSE] generator ended session=%s total_events=%d", session_id, event_count)
+        logger.info("[SSE] generator (v2) ended session=%s total_events=%d",
+                    session_id, event_count)
 
 
-async def _replay_missed(
-    last_id: str, session_id: str, event_count: int,
-) -> tuple[str, int, list[str]]:
-    """Replay missed events from last_event_id, return (last_id, event_count, lines)."""
-    lines: list[str] = []
-    if last_id:
-        missed = sse_buffer.replay_from(last_id, session_id)
-        for evt in missed:
-            lines.append(_format_sse(evt))
-            last_id = evt.id
-        logger.debug("[SSE] replayed %d missed events session=%s", len(missed), session_id)
+def _format_event_v2(event) -> str:
+    """Format an EventV2 as an SSE frame.
 
-    existing = sse_buffer.get_events_since(session_id, last_id)
-    for evt in existing:
-        lines.append(_format_sse(evt))
-        last_id = evt.id
-    if existing:
-        logger.debug("[SSE] flushed %d existing events session=%s", len(existing), session_id)
-    return last_id, event_count, lines
-
-
-def _format_sse(evt) -> str:
-    """Format an SSEEvent as an SSE text line."""
+    Field mapping (EventV2 -> SSE): ``id`` -> id, ``type`` -> event,
+    ``data`` -> JSON payload. The frontend receives the same wire shape
+    it did on the legacy buffer track.
+    """
     lines = []
-    if evt.id:
-        lines.append(f"id: {evt.id}")
-    if evt.event:
-        lines.append(f"event: {evt.event}")
-    for line in evt.data.split("\n"):
+    if getattr(event, "id", None):
+        lines.append(f"id: {event.id}")
+    event_type = getattr(event, "type", "") or ""
+    if event_type:
+        lines.append(f"event: {event_type}")
+    payload = getattr(event, "data", None) or {}
+    try:
+        data = json.dumps(payload, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        data = json.dumps({})
+    for line in data.split("\n"):
         lines.append(f"data: {line}")
     return "\n".join(lines) + "\n\n"
-
 
 def _heartbeat_sse(count: int) -> str:
     """SSE comment-line keep-alive (opencode style).
