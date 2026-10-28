@@ -64,8 +64,8 @@ class PermissionGateway:
         self._rules_path = rules_path
         self._timeout_s = timeout_s
         self._on_request = on_request
-        # tool_call_id -> Future[PermissionResponse]
-        self._pending: dict[str, asyncio.Future[PermissionResponse]] = {}
+        # tool_call_id -> (Future[PermissionResponse], owner session_id)
+        self._pending: dict[str, tuple[asyncio.Future[PermissionResponse], str]] = {}
         # Audit log: every ASK response is recorded for debugging.
         self._history: list[dict[str, Any]] = []
 
@@ -113,7 +113,11 @@ class PermissionGateway:
 
         loop = asyncio.get_event_loop()
         future: asyncio.Future[PermissionResponse] = loop.create_future()
-        self._pending[tool_call_id] = future
+        # P5-5①: record the owning session so the respond endpoint can
+        # enforce ownership (the args payload carries __session_id__,
+        # stashed by the tool executor for exactly this SSE-hook reason).
+        session_id = str(args.get("__session_id__", "") or "")
+        self._pending[tool_call_id] = (future, session_id)
 
         # Fire the SSE / UI hook so the user knows there's a prompt.
         if self._on_request is not None:
@@ -166,11 +170,23 @@ class PermissionGateway:
         """Front-end reply. Returns True if a pending request was
         resolved; False when the id is unknown (already timed out
         or answered)."""
-        future = self._pending.get(tool_call_id)
-        if future is None or future.done():
+        entry = self._pending.get(tool_call_id)
+        if entry is None:
+            return False
+        future = entry[0] if isinstance(entry, tuple) else entry
+        if future.done():
             return False
         future.set_result(response)
         return True
+
+    def owner_session_of(self, tool_call_id: str) -> str | None:
+        """P5-5①: the session that raised this pending request, or None."""
+        entry = self._pending.get(tool_call_id)
+        if entry is None:
+            return None
+        if isinstance(entry, tuple):
+            return entry[1] or None
+        return None
 
     # ── Internals ──────────────────────────────────────────────
 

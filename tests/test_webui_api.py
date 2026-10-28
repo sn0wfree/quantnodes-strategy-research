@@ -11,8 +11,13 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     from strategy_research.api.app import create_app
+    from strategy_research.api.auth_tokens import create_token
+
     app = create_app()
-    return TestClient(app)
+    c = TestClient(app)
+    # P5-5①: /api/chat/ no longer public
+    c.headers.update({"Authorization": f"Bearer {create_token('tester')}"})
+    return c
 
 
 class TestAuth:

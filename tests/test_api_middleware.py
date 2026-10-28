@@ -368,7 +368,6 @@ class TestDisabledAccount:
         assert res.json()["detail"] == "Account is disabled"
 
     def test_active_user_allowed(self, app, client, monkeypatch, tmp_path):
-        import sqlite3
 
         from strategy_research.api import user_db as user_db_mod
 
@@ -393,8 +392,9 @@ class TestDisabledAccount:
         res = client.get("/api/protected", headers=headers)
         assert res.status_code == 200  # middleware passes; endpoint has no auth dep
 
-    def test_is_active_swallows_db_errors(self, tmp_path, monkeypatch):
-        """If the DB lookup raises, _is_active should not crash the request."""
+    def test_is_active_fails_closed_on_db_errors(self, tmp_path, monkeypatch):
+        """If the DB lookup raises, _is_active fails CLOSED (B9 fix:
+        a lookup failure must never re-enable a disabled account)."""
         from strategy_research.api import user_db as user_db_mod
         from strategy_research.api.middleware import AuthMiddleware
 
@@ -404,4 +404,4 @@ class TestDisabledAccount:
 
         monkeypatch.setattr(user_db_mod, "get_user_db", lambda *a, **k: BrokenDB())
         mw = AuthMiddleware.__new__(AuthMiddleware)
-        assert mw._is_active("anything") is True
+        assert mw._is_active("anything") is False

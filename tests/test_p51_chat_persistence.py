@@ -61,6 +61,10 @@ def env(tmp_path: Path, monkeypatch):
     get_gateway(client=client)
 
     with TestClient(app) as tc:
+        # P5-5①: /api/chat/ 不再公开——测试带认证头
+        from strategy_research.api.auth_tokens import create_token
+
+        tc.headers.update({"Authorization": f"Bearer {create_token('tester')}"})
         # 建会话
         tc.post("/api/chat/session", json={"id": "sess-1", "title": "t"})
         yield tc, db_path, client

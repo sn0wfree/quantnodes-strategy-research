@@ -54,6 +54,16 @@ async def respond_permission(
         logger.warning("permission respond: gateway not available")
         return {"status": "no_gateway"}
 
+    # P5-5①: ownership — a permission answer mutates the process-wide
+    # ruleset (permanent=true persists rules), so only the session
+    # owner may answer. Unknown/expired ids fall through to the
+    # gateway's expired path (no oracle).
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    owner_session = gateway.owner_session_of(body.tool_call_id)
+    if owner_session:
+        from .web_session import _fetch_session_owned, _get_db
+        _fetch_session_owned(_get_db(), owner_session, user_id)
+
     try:
         action_enum = PermissionAction(body.action.lower())
     except ValueError:

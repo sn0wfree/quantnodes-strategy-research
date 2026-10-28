@@ -19,7 +19,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
     SKIP_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
     PUBLIC_PREFIXES = [
         "/api/auth/",
-        "/api/chat/",
+        # /api/chat/ removed from public prefixes (P5-5①): chat carries
+        # private sessions AND the permission-respond gate — anonymous
+        # access let anyone read/export/delete any anonymous session and
+        # answer permission prompts (poisoning the process-wide ruleset
+        # with permanent rules). The SPA client already sends the bearer
+        # token on every call and 401-redirects to /login; the login
+        # page only calls /api/auth/* (still public).
         # /api/study/ removed from public prefixes: study task endpoints
         # require authentication + session ownership like chat (see
         # _fetch_session_owned in routers/web_session.py). The

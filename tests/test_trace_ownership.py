@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+import strategy_research.api.session.web_session_db as _wsdb
 from strategy_research.api.app import create_app
 from strategy_research.api.auth_tokens import create_token
-import strategy_research.api.session.web_session_db as _wsdb
 
 
 @pytest.fixture
@@ -42,13 +42,13 @@ def test_trace_rejects_foreign_user(client: TestClient) -> None:
 
 
 def test_trace_rejects_tokenless_caller(client: TestClient) -> None:
-    """A tokenless caller (user_id='anonymous') must not read a session
-    owned by an authenticated user."""
+    """A tokenless caller is rejected at the middleware layer (P5-5①:
+    /api/chat/ is no longer a public prefix → 401 before ownership)."""
     owner = {"Authorization": f"Bearer {create_token('admin')}"}
     sid = _new_session(client, owner)
 
     r = client.get(f"/api/chat/session/{sid}/trace")
-    assert r.status_code == 403
+    assert r.status_code == 401
 
 
 def test_trace_allows_owner(client: TestClient) -> None:

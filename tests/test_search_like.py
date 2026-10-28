@@ -27,11 +27,18 @@ def app_client(tmp_path: Path, monkeypatch):
 
     app = create_app()
     with TestClient(app) as client:
+        # P5-5①: chat 端点要求认证
+        from strategy_research.api.auth_tokens import create_token
+
+        client.headers.update(
+            {"Authorization": f"Bearer {create_token('tester')}"},
+        )
         yield client, db_path
 
 
 def _seed(db_path: Path, session_id: str = "s1", *,
-          user_id: str = "anonymous", archived: int = 0) -> None:
+          user_id: str = "tester", archived: int = 0) -> None:
+    # 默认属主 = 测试 token 用户（P5-5①：搜索按会话属主过滤）
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute(
