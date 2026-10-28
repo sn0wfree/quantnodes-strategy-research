@@ -1045,6 +1045,7 @@ async def chat_export(
 
 @router.get("/session/{session_id}/trace")
 async def get_session_trace(
+    request: Request,
     session_id: str,
     limit: int = Query(100, ge=1, le=500),
     types: str | None = Query(None, description="Comma-separated event types to filter"),
@@ -1056,9 +1057,17 @@ async def get_session_trace(
     offloaded fields (system_prompt, tools_schema) from their sidecar
     blobs. trace.jsonl is used only as a backward-compat fallback for
     sessions that predate A1 (no llm_request events in the event_log).
+
+    Security (P5-5②): ownership enforced — a session's trace contains the
+    full LLM trajectory (system_prompt, tool schemas); previously ANY
+    caller could read ANY session's trace. 404/403 per _fetch_session_owned.
     """
     from ...core.agent.trace import TraceWriter
     from ..session.trace_projection import TraceProjection
+
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", "anonymous")
+    _fetch_session_owned(_get_db(), session_id, user_id)
 
     type_filter = set(types.split(",")) if types else None
 
