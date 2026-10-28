@@ -81,16 +81,36 @@
 
 ---
 
-## 4. 测试健康度（实测）
+## 4. 测试健康度（实测基线）
 
-- **可收集测试**：12,900（PR 道 9,862，另有 3,038 为 llm/e2e/slow 道）
-- **已知预存阻塞**（非本次改动引入，stash 验证过）：
-  - `test_e2e_full_flow`：approval 等待 1800s 后超时（9/5 记录在案的陈旧测试）
-  - `test_sse_e2e` / `test_e2e_chat` / `test_e2e_comprehensive` / `test_webui_e2e*`：真实 uvicorn + socket 长阻塞
-  - `test_alpha_zoo_adapter` ×2：`compute_as_series` 未按约定 dropna
-- **已修复的隔离问题**（本轮）：`test_lifespan_recover` 陈旧 `_scheduler_cache` 引用（2 ERROR → 2 PASS）
+**PR 道实测基线（2026-10-28，排除 6 个已知无限阻塞的 live/e2e 套件）**：
 
-**判断**：预存阻塞集中在 live/e2e 测试，单元与集成道基本健康。全量绿的前提是先把这些 live 套件分道 + 加超时。
+```
+9632 passed, 127 failed, 61 skipped, 7 errors — 363s
+```
+
+**归因结论（已用历史 commit 对比验证）**：这 127 个失败**全部预存**，与本轮所有改动无关。
+
+验证方法：在 `616085ee`（安全改动前的提交）上跑同一批失败最集中的 5 个文件，
+失败集合与当前 HEAD **逐条完全相同**（24/25 的差异来自随机序波动）。
+抽样确认的失败族：
+
+| 失败族 | 数量 | 性质 |
+|---|---|---|
+| `test_shell_tool` | 6 | POSIX 命令（pwd/ls/python -c）在 Windows 上跑不了——**环境性** |
+| `test_runner_dag_helpers` | 13 | 遗留 runner DAG 助手，旧执行体耦合 |
+| `test_route_agent_event_*` | 11 | 事件路由，同属旧执行体 |
+| `test_compact_*` | 13 | 压缩管道，同属旧执行体 |
+| `test_study_runner_integration` | 7 | study runner 集成 |
+| `test_webui_e2e` / `test_webui_api` / 其余 | ~77 | 分散，多为旧路径/环境断言 |
+
+**这些失败高度集中在旧 AgentLoop 生态**（runner/route/compact/tools）——
+即 C1 要迁移的对象。预期它们随 C1 迁移自然消失，而不是逐个修。
+
+**已知无限阻塞（必须先分道）**：
+`test_e2e_full_flow`（approval 1800s）、`test_sse_e2e`、`test_e2e_chat`、
+`test_e2e_comprehensive`、`test_webui_e2e`、`test_webui_e2e_playwright`、
+`test_chat_e2e_playwright`——真实 uvicorn + socket 长等待。
 
 ---
 
@@ -117,7 +137,7 @@
 
 | # | 事项 | 工期 | 说明 |
 |---|---|---|---|
-| A1 | **测试分道 + 预存阻塞清理** | 2-3d | 把 live/e2e 套件显式分道、加超时；修 `test_e2e_full_flow` 的 approval_timeout；`alpha_zoo` 两条。**这是所有后续验收的基础**——没有稳定基线，后续改动无法判定回归 |
+| A1 | **测试分道 + 预存阻塞清理** | 2-3d | ① 7 个 live/e2e 套件显式分道（当前会无限阻塞）；② 127 个预存失败按 §4 的族归类——**其中 ~44 个是 Windows 环境性或属旧执行体，建议随 C1 自然消失而非逐个修**；③ 修 `test_e2e_full_flow` 的 approval_timeout（一行参数）与 `alpha_zoo` 两条。**这是所有后续验收的基础** |
 | A2 | P5-3 SSE 单轨 | ~2d | 独立工程，8 生产 + 7 测试文件 |
 | A3 | P5-1c 旧 chat 分支 | 0.5-1d | 已挂起，业务稳定后 |
 
