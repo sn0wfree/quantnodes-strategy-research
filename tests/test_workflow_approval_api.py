@@ -64,11 +64,34 @@ class FakeLoop:
 
 @pytest.fixture()
 def api_env(tmp_path: Path, monkeypatch):
-    """Point SR_WORKSPACE_PATH at a temp dir + reset module singletons."""
+    """Point SR_WORKSPACE_PATH at a temp dir + reset module singletons.
+
+    SR_ADMIN_TOKEN is set so destructive endpoints (definitions DELETE,
+    P5-5③) have the ops token enabled for tests that exercise them.
+    Seeds a real session ``s1`` owned by ``tester`` — start-definition
+    now enforces session ownership (P5-5③).
+    """
     monkeypatch.setenv("SR_WORKSPACE_PATH", str(tmp_path))
+    monkeypatch.setenv("SR_ADMIN_TOKEN", "test-admin-token")
     import strategy_research.api.routers.workflow as wf
     wf._run_store = None
     wf._run_registry = None
+    # Session DB under tmp + seed session s1 owned by tester
+    import strategy_research.api.session.web_session_db as wsdb
+    monkeypatch.setattr(wsdb, "_get_db_path", lambda: str(tmp_path / "sessions.db"))
+    import asyncio as _asyncio
+    from types import SimpleNamespace as _NS
+
+    from strategy_research.api.routers.web_session import (
+        WebSessionCreate,
+        create_session,
+    )
+
+    async def _seed() -> None:
+        request = _NS(state=_NS(user_id="tester"))
+        await create_session(WebSessionCreate(id="s1", title="t"), request)
+
+    _asyncio.run(_seed())
     app = _build_asgi_app()
     yield app, tmp_path
     wf._run_store = None
@@ -140,7 +163,10 @@ class TestDefinitionsCRUD:
     async def test_delete_builtin_rejected(self, api_env):
         app, _ = api_env
         async with _client(app) as client:
-            resp = await client.delete("/api/goal/workflow/definitions/alpha_research")
+            resp = await client.delete(
+                "/api/goal/workflow/definitions/alpha_research",
+                headers={"X-Admin-Token": "test-admin-token"},
+            )
             assert resp.status_code == 422
             assert "read-only" in resp.json()["detail"]
 
@@ -150,9 +176,22 @@ class TestDefinitionsCRUD:
             resp = await client.post("/api/goal/workflow/definitions/alpha_research/copy")
             assert resp.status_code == 200
             assert user_dir(tmp_path).joinpath("alpha_research.json").is_file()
-            resp = await client.delete("/api/goal/workflow/definitions/alpha_research")
+            # P5-5③: destructive delete needs the admin token
+            resp = await client.delete(
+                "/api/goal/workflow/definitions/alpha_research",
+                headers={"X-Admin-Token": "test-admin-token"},
+            )
             assert resp.status_code == 200
             assert resp.json()["deleted"] == "alpha_research"
+
+    async def test_delete_without_admin_token_rejected(self, api_env):
+        """P5-5③: user-token DELETE of a user definition → 401/403
+        (destructive writes need the admin token)."""
+        app, _ = api_env
+        async with _client(app) as client:
+            await client.post("/api/goal/workflow/definitions/alpha_research/copy")
+            resp = await client.delete("/api/goal/workflow/definitions/alpha_research")
+            assert resp.status_code in (401, 403)
 
     async def test_missing_definition_404(self, api_env):
         app, _ = api_env

@@ -7,7 +7,7 @@ import json
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -46,13 +46,55 @@ def _prune_runners() -> None:
         _active_runners.pop(goal_id, None)
 
 
+def _runner_visible(entry: dict, user_id: str) -> bool:
+    """P5-5③: runner entries are owner-scoped.
+
+    owner None can only be an in-memory entry from the seconds before a
+    hot-reload picks up this fix (runners are ephemeral, TTL 1h) — kept
+    visible to avoid locking operators out mid-deploy.
+    """
+    owner = entry.get("owner")
+    return owner is None or owner == user_id
+
+
+async def _require_run_access(run_id: str, request: Request) -> None:
+    """P5-5③: definition runs are owner-scoped via the bound session.
+
+    Live runners carry the owner stamped at /start-definition; persisted
+    records resolve ownership through their ``session_id`` (the runs
+    table already stores it — no schema change needed). 404 unknown,
+    403 foreign, same semantics as chat sessions.
+    """
+    from .web_session import _fetch_session_owned, _get_db
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    registry = _get_run_registry()
+    runner = registry.get(run_id)
+    owner = getattr(runner, "_owner", None) if runner is not None else None
+    if owner == user_id:
+        return
+    record = _get_run_store().get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    _fetch_session_owned(_get_db(), record["session_id"], user_id)
+
+
 @router.post("/start")
 async def workflow_start(req: WorkflowStartRequest, request: Request):
-    """Start a goal workflow by name."""
+    """Start a goal workflow by name.
+
+    P5-5③: the caller must own the bound session; the runner entry
+    records the owner so status/pause/resume/directive/events are
+    object-scoped (previously ANY authenticated user could control ANY
+    run via the shared in-process registry).
+    """
     try:
         from ...core.goal.workflow import GoalWorkflowRunner
         from ...core.goal.workflow_config import load_goal_workflow
         from .chat import _get_session_service
+        from .web_session import _fetch_session_owned, _get_db
+
+        user_id = getattr(request.state, "user_id", None) or "anonymous"
+        _fetch_session_owned(_get_db(), req.session_id, user_id)
 
         config = load_goal_workflow(req.workflow_name)
         session_service = _get_session_service()
@@ -69,6 +111,7 @@ async def workflow_start(req: WorkflowStartRequest, request: Request):
             "session_id": req.session_id,
             "workflow_name": req.workflow_name,
             "started_at": time.time(),
+            "owner": user_id,
         }
 
         return {
@@ -83,11 +126,13 @@ async def workflow_start(req: WorkflowStartRequest, request: Request):
 
 
 @router.get("/status")
-async def workflow_status(goal_id: str):
-    """Get workflow progress for a goal."""
+async def workflow_status(goal_id: str, request: Request):
+    """Get workflow progress for a goal (owner-scoped; foreign ids and
+    unknown ids return the same not_found shape — no existence oracle)."""
     _prune_runners()
     entry = _active_runners.get(goal_id)
-    if entry is None:
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    if entry is None or not _runner_visible(entry, user_id):
         return {"status": "not_found", "goal_id": goal_id}
 
     runner = entry["runner"]
@@ -101,11 +146,12 @@ async def workflow_status(goal_id: str):
 
 
 @router.post("/pause")
-async def workflow_pause(goal_id: str, immediate: bool = False):
-    """Pause a running workflow."""
+async def workflow_pause(goal_id: str, request: Request, immediate: bool = False):
+    """Pause a running workflow (owner-scoped)."""
     _prune_runners()
     entry = _active_runners.get(goal_id)
-    if entry is None:
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    if entry is None or not _runner_visible(entry, user_id):
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     runner = entry["runner"]
@@ -114,11 +160,12 @@ async def workflow_pause(goal_id: str, immediate: bool = False):
 
 
 @router.post("/resume")
-async def workflow_resume(goal_id: str):
-    """Resume a paused workflow."""
+async def workflow_resume(goal_id: str, request: Request):
+    """Resume a paused workflow (owner-scoped)."""
     _prune_runners()
     entry = _active_runners.get(goal_id)
-    if entry is None:
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    if entry is None or not _runner_visible(entry, user_id):
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     runner = entry["runner"]
@@ -131,11 +178,12 @@ class WorkflowDirectiveRequest(BaseModel):
 
 
 @router.post("/directive")
-async def workflow_directive(goal_id: str, req: WorkflowDirectiveRequest):
-    """Add a user directive to a running workflow."""
+async def workflow_directive(goal_id: str, req: WorkflowDirectiveRequest, request: Request):
+    """Add a user directive to a running workflow (owner-scoped)."""
     _prune_runners()
     entry = _active_runners.get(goal_id)
-    if entry is None:
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    if entry is None or not _runner_visible(entry, user_id):
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     runner = entry["runner"]
@@ -265,10 +313,11 @@ def _handle_observer_event(event: str, data: dict, runner) -> list[str]:
 
 
 @router.get("/events")
-async def workflow_events(goal_id: str):
-    """SSE endpoint for workflow progress events."""
+async def workflow_events(goal_id: str, request: Request):
+    """SSE endpoint for workflow progress events (owner-scoped)."""
     entry = _active_runners.get(goal_id)
-    if entry is None:
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    if entry is None or not _runner_visible(entry, user_id):
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     return StreamingResponse(
@@ -348,9 +397,23 @@ CREATE TABLE IF NOT EXISTS drafts (
     dag_id TEXT PRIMARY KEY,
     nodes_json TEXT NOT NULL,
     edges_json TEXT NOT NULL,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    owner TEXT
 )
 """
+
+
+def _draft_db() -> Any:
+    import sqlite3
+    conn = sqlite3.connect(_definition_workspace() / "workflows.db")
+    conn.execute(_DRAFT_TABLE_DDL)
+    # P5-5③: owner column migration for DBs created before the column
+    # existed (old rows keep owner NULL → treat as unowned/shared-legacy).
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(drafts)").fetchall()}
+    if "owner" not in cols:
+        conn.execute("ALTER TABLE drafts ADD COLUMN owner TEXT")
+    conn.commit()
+    return conn
 
 
 class OrchestrateSessionRequest(BaseModel):
@@ -361,14 +424,6 @@ class DraftRequest(BaseModel):
     dag_id: str
     nodes: list[dict]
     edges: list[dict]
-
-
-def _draft_db() -> Any:
-    import sqlite3
-    conn = sqlite3.connect(_definition_workspace() / "workflows.db")
-    conn.execute(_DRAFT_TABLE_DDL)
-    conn.commit()
-    return conn
 
 
 @router.post("/orchestrate/session")
@@ -392,16 +447,23 @@ async def orchestrate_session(body: OrchestrateSessionRequest, request: Request)
 
 @router.put("/orchestrate/draft")
 async def draft_put(body: DraftRequest, request: Request):
-    """Upsert the canvas draft (auto-saved editor state)."""
+    """Upsert the canvas draft (auto-saved editor state).
+
+    P5-5③: the draft is stamped with the caller's user_id; reads/deletes
+    by another user return 404. Legacy rows (owner NULL, pre-fix DBs) stay
+    shared-legacy: readable and claimable by the next writer.
+    """
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
     conn = _draft_db()
     try:
         conn.execute(
-            "INSERT INTO drafts (dag_id, nodes_json, edges_json, updated_at) "
-            "VALUES (?, ?, ?, ?) "
+            "INSERT INTO drafts (dag_id, nodes_json, edges_json, updated_at, owner) "
+            "VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(dag_id) DO UPDATE SET nodes_json=excluded.nodes_json, "
-            "edges_json=excluded.edges_json, updated_at=excluded.updated_at",
+            "edges_json=excluded.edges_json, updated_at=excluded.updated_at, "
+            "owner=excluded.owner",
             (body.dag_id, json.dumps(body.nodes, ensure_ascii=False),
-             json.dumps(body.edges, ensure_ascii=False), time.time()),
+             json.dumps(body.edges, ensure_ascii=False), time.time(), user_id),
         )
         conn.commit()
     finally:
@@ -410,25 +472,36 @@ async def draft_put(body: DraftRequest, request: Request):
 
 
 @router.get("/orchestrate/draft/{dag_id}")
-async def draft_get(dag_id: str):
-    """Return the saved canvas draft, or {dag: null} when absent."""
+async def draft_get(dag_id: str, request: Request):
+    """Return the saved canvas draft, or {dag: null} when absent/foreign."""
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
     conn = _draft_db()
     try:
         row = conn.execute(
-            "SELECT nodes_json, edges_json FROM drafts WHERE dag_id = ?", (dag_id,)
+            "SELECT nodes_json, edges_json, owner FROM drafts WHERE dag_id = ?",
+            (dag_id,),
         ).fetchone()
     finally:
         conn.close()
     if row is None:
         return {"dag": None}
+    owner = row[2]
+    if owner is not None and owner != user_id:
+        return {"dag": None}  # foreign draft: same shape as absent (no oracle)
     return {"dag": {"nodes": json.loads(row[0]), "edges": json.loads(row[1])}}
 
 
 @router.delete("/orchestrate/draft/{dag_id}")
-async def draft_delete(dag_id: str):
+async def draft_delete(dag_id: str, request: Request):
     """Clear the draft (after the definition is explicitly saved)."""
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
     conn = _draft_db()
     try:
+        row = conn.execute(
+            "SELECT owner FROM drafts WHERE dag_id = ?", (dag_id,),
+        ).fetchone()
+        if row is not None and row[0] is not None and row[0] != user_id:
+            raise HTTPException(status_code=404, detail="Draft not found")
         conn.execute("DELETE FROM drafts WHERE dag_id = ?", (dag_id,))
         conn.commit()
     finally:
@@ -469,9 +542,16 @@ async def definitions_get(name: str, request: Request):
 
 
 @router.delete("/definitions/{name}")
-async def definitions_delete(name: str, request: Request):
-    """Delete a user definition. Builtin definitions are read-only."""
+async def definitions_delete(name: str, request: Request, x_admin_token: str | None = Header(None)):
+    """Delete a user definition (destructive → admin token required).
+
+    P5-5③: reads stay shared (definitions are team assets, like builtins),
+    but destructive writes need the admin token. Builtin definitions are
+    read-only regardless.
+    """
     from ...core.workflow.builtin import delete_user_definition, load_definition
+    from .admin import _verify_admin
+    _verify_admin(x_admin_token)
     definition = load_definition(name, _definition_workspace())
     if definition is None:
         raise HTTPException(status_code=404, detail=f"Definition '{name}' not found")
@@ -515,10 +595,15 @@ async def definitions_graph(name: str, request: Request):
 
 @router.post("/start-definition")
 async def start_definition(req: WorkflowStartDefinitionRequest, request: Request):
-    """Start a modular workflow definition run."""
+    """Start a modular workflow definition run (session ownership required;
+    the run is owner-stamped for status/detail/events/approve access)."""
     from ...core.workflow.builtin import load_definition
     from ...core.workflow.executor import WorkflowRunner
     from ...core.workflow.node_types import register_builtin_tool_executors
+    from .web_session import _fetch_session_owned, _get_db
+
+    user_id = getattr(request.state, "user_id", None) or "anonymous"
+    _fetch_session_owned(_get_db(), req.session_id, user_id)
 
     definition = load_definition(req.definition_name, _definition_workspace())
     if definition is None:
@@ -535,6 +620,7 @@ async def start_definition(req: WorkflowStartDefinitionRequest, request: Request
         session_id=req.session_id,
         params_override=req.params or None,
     )
+    runner._owner = user_id  # P5-5③: ownership stamp (live-run gate)
     run_id = runner.start()
     registry.put(runner)
     snapshot = runner.status_snapshot()
@@ -543,7 +629,8 @@ async def start_definition(req: WorkflowStartDefinitionRequest, request: Request
 
 @router.post("/approve")
 async def workflow_approve(req: WorkflowApproveRequest, request: Request):
-    """Respond to a pending approval gate (approve or reject + edits)."""
+    """Respond to a pending approval gate (owner-scoped)."""
+    await _require_run_access(req.run_id, request)
     registry = _get_run_registry()
     runner = registry.get(req.run_id)
     if runner is None:
@@ -554,8 +641,9 @@ async def workflow_approve(req: WorkflowApproveRequest, request: Request):
 
 
 @router.get("/run/{run_id}/status")
-async def run_status(run_id: str):
+async def run_status(run_id: str, request: Request):
     """Run status: live snapshot if active, else persisted record."""
+    await _require_run_access(run_id, request)
     store = _get_run_store()
     registry = _get_run_registry()
     runner = registry.get(run_id)
@@ -568,8 +656,9 @@ async def run_status(run_id: str):
 
 
 @router.get("/run/{run_id}")
-async def run_detail(run_id: str):
+async def run_detail(run_id: str, request: Request):
     """Run detail: lifecycle + segments + node outputs + approvals."""
+    await _require_run_access(run_id, request)
     store = _get_run_store()
     record = store.get_run(run_id)
     if record is None:
@@ -596,6 +685,7 @@ def _approval_node_ids(store: Any, run_id: str) -> list[str]:
 @router.get("/run/{run_id}/events")
 async def run_events(run_id: str, request: Request):
     """SSE event history (polling-based, works after process restart)."""
+    await _require_run_access(run_id, request)
     store = _get_run_store()
 
     async def _stream():
@@ -626,8 +716,9 @@ async def run_events(run_id: str, request: Request):
 
 
 @router.delete("/run/{run_id}")
-async def run_delete(run_id: str):
-    """Delete run history (all related rows)."""
+async def run_delete(run_id: str, request: Request):
+    """Delete run history (owner-scoped, all related rows)."""
+    await _require_run_access(run_id, request)
     store = _get_run_store()
     if store.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
