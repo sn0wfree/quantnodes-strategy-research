@@ -162,6 +162,68 @@ def test_phase_engine_has_no_gate_import():
     assert "research_graph_enabled()" not in source
 
 
+# ── 数据面：messages 单一写入者（S3）─────────────────────
+
+
+def test_messages_table_written_only_by_projection_or_guarded_persist():
+    """`INSERT INTO messages` 白名单（S3 数据面收敛契约）。
+
+    统一库 messages 表的设计写入者只有两个：
+    - ``api/session/projection_store.py``：projector（事件 fold）；
+    - ``api/routers/web_session.py``：``persist_message`` 兼容直写
+      （带 message_id 幂等防护，服务 compaction/slash 回调）。
+
+    已知遗留（**各自写不同文件**，不污染统一库；到期随 C1 退役）：
+    - ``core/agent/memory_manager.py``：MemoryManager 自有 SQLiteStore；
+    - ``core/session/db.py``：旧会话栈（schema 与统一库不兼容，见
+      docs/stage-s3-message-writer-convergence-20261028.md §2 修订）。
+
+    新增任何写者即失败——这份白名单只能缩短，不能变长。
+    """
+    allowed = {
+        "api/session/projection_store.py",
+        "api/routers/web_session.py",
+        # Known-legacy (separate files, retire with C1):
+        "core/agent/memory_manager.py",
+        "core/session/db.py",
+    }
+    # 精确匹配表名 messages（不要把 messages_fts 索引写入算进来）
+    import re as _re
+
+    pattern = _re.compile(
+        r"INSERT\s+(?:OR\s+\w+\s+)?INTO\s+messages\s*\(",
+        _re.IGNORECASE,
+    )
+    violations: list[str] = []
+    for path in _iter_py(SRC):
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        if not pattern.search(source):
+            continue
+        rel = path.relative_to(SRC).as_posix()
+        if rel not in allowed:
+            violations.append(rel)
+    assert not violations, (
+        "messages 表出现未授权写入者（S3 白名单只允许 projector + "
+        "persist_message + 两个已知遗留）:\n" + "\n".join(violations)
+    )
+
+
+def test_legacy_session_db_stays_separate_from_unified_db():
+    """S3 修订：旧会话栈写自己的文件——schema 与统一库不兼容
+    （id INTEGER vs TEXT / timestamp vs created_at），合并会写坏表。
+    此测试钉死「不得把两者指向同一文件」这条结论。"""
+    from strategy_research.core.agent.memory_manager import (
+        resolve_session_db_path,
+    )
+    from strategy_research.core.session import db as session_db
+
+    legacy = session_db._default_db_path()
+    unified = resolve_session_db_path()
+    assert legacy.resolve() != unified.resolve(), (
+        "旧会话栈与统一库不得指向同一文件（messages schema 不兼容）"
+    )
+
+
 # ── 消费归属：kind 过滤不得丢失工单 ────────────────────
 
 

@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 
 SESSIONS_DB = Path.home() / ".quantnodes-research" / "sessions.db"
 
+
+# S3 数据面收敛 — 决策记录（2026-10-28）：
+# 曾尝试把默认路径改到统一库（resolve_session_db_path），但核实发现两套
+# messages schema **不兼容**：
+#   旧（本模块）: id INTEGER PRIMARY KEY, timestamp REAL
+#   统一库     : id TEXT PRIMARY KEY, created_at REAL NOT NULL
+# 直接指向同一文件会让本模块的 INSERT 写坏/写崩表。故本模块仍写自己的
+# 文件（默认不变），统一库的分叉视图问题留待 C1（MemoryManager 事件化）
+# 一并解决——那时本模块随旧会话栈整体退役。见
+# docs/stage-s3-message-writer-convergence-20261028.md §2 修订。
+def _default_db_path() -> Path:
+    """Legacy session DB path (kept separate — schema incompatible)."""
+    return SESSIONS_DB
+
 _CREATE_SESSIONS = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -78,7 +92,7 @@ class SessionDB:
         rate_limiter: RateLimiter | None = None,
         metrics_logger: MetricsLogger | None = None,
     ) -> None:
-        self._db_path = Path(db_path) if db_path else SESSIONS_DB
+        self._db_path = Path(db_path) if db_path else _default_db_path()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._rate_limiter = rate_limiter or RateLimiter()
         self._metrics_logger = metrics_logger or MetricsLogger()

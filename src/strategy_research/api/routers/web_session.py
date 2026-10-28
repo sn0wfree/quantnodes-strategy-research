@@ -103,6 +103,20 @@ def persist_message(
             logger.warning("[DB] persist_message: session %s not found", session_id)
             return msg_id
 
+        # S3 idempotency guard: the projector may have already projected
+        # the same event into messages (message_received / assistant_message
+        # both carry a message_id). Re-inserting would violate UNIQUE(id)
+        # and — worse — double-count the session message_count.
+        existing = conn.execute(
+            "SELECT 1 FROM messages WHERE id = ?", (msg_id,),
+        ).fetchone()
+        if existing is not None:
+            logger.debug(
+                "[DB] persist_message: id=%s already present (projector "
+                "wrote it first); skipping", msg_id,
+            )
+            return msg_id
+
         # Level 2 / Phase 2 commit 6: parts_json and tool_call_id
         # columns were dropped. Build the INSERT dynamically based on
         # which columns are present, so this function works on both
