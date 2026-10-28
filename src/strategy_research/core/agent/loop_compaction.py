@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any, Callable
 logger = logging.getLogger(__name__)
 
 from ..utils.token_utils import estimate_tokens
-from .compact import compact_messages
-from .loop import _compaction_persister
+from . import compact as _compact_mod
+from . import loop as _loop_mod
 
 if TYPE_CHECKING:
     pass
@@ -46,8 +46,12 @@ class LoopCompactionMixin:
         )
 
     def _run_compact_messages(self, messages: list[dict[str, Any]]):
-        """Invoke the compact_messages engine with the loop's config."""
-        return compact_messages(
+        """Invoke the compact_messages engine with the loop's config.
+
+        Resolved through the module (not a from-import) so tests that
+        patch ``compact.compact_messages`` actually intercept the call.
+        """
+        return _compact_mod.compact_messages(
             messages,
             config=self.cc,
             threshold_tokens=self.threshold_tokens,
@@ -220,14 +224,19 @@ class LoopCompactionMixin:
                 # event, which made misconfigured deployments invisible
                 # to operators. Now the misconfiguration is surfaced
                 # immediately at runtime.
-                if _compaction_persister is None:
+                # Read the persister through the module (NOT a from-import):
+                # a from-import binds the value at module load time, so a
+                # later register_compaction_persister() call would never be
+                # visible here — the compaction path would always raise.
+                persister = _loop_mod._compaction_persister
+                if persister is None:
                     raise RuntimeError(
                         f"compaction_persister not registered; cannot "
                         f"persist compaction event {comp.id}. Register "
                         f"via register_compaction_persister() in the "
                         f"api/cli entry point."
                     )
-                _compaction_persister(
+                persister(
                     session_id=comp.session_id,
                     role="assistant",  # DB compat
                     content=comp.summary,

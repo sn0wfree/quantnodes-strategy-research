@@ -152,7 +152,7 @@ class TestAsyncMaybeCompact:
             {"role": "assistant", "content": "y" * 300},
         ]
         with patch(
-            "strategy_research.core.agent.loop.compact_messages",
+            "strategy_research.core.agent.compact.compact_messages",
             side_effect=RuntimeError("compact error"),
         ):
             result, applied = await loop._amaybe_compact(msgs)
@@ -176,7 +176,7 @@ class TestAsyncMaybeCompact:
             "recent text",
         )
         with patch(
-            "strategy_research.core.agent.loop.compact_messages",
+            "strategy_research.core.agent.compact.compact_messages",
             return_value=mock_result,
         ), patch.object(
             loop, "_persist_compaction_event",
@@ -203,7 +203,7 @@ class TestAsyncMaybeCompact:
             "recent text",
         )
         with patch(
-            "strategy_research.core.agent.loop.compact_messages",
+            "strategy_research.core.agent.compact.compact_messages",
             return_value=mock_result,
         ), patch.object(
             loop, "_persist_compaction_event",
@@ -251,7 +251,7 @@ class TestSyncMaybeCompact:
         loop = self._make_loop()
         msgs = [{"role": "user", "content": "hello"}]
         with patch(
-            "strategy_research.core.agent.loop.compact_messages",
+            "strategy_research.core.agent.compact.compact_messages",
             side_effect=RuntimeError("error"),
         ):
             result, applied = loop._maybe_compact(msgs)
@@ -272,7 +272,7 @@ class TestSyncMaybeCompact:
             "recent",
         )
         with patch(
-            "strategy_research.core.agent.loop.compact_messages",
+            "strategy_research.core.agent.compact.compact_messages",
             return_value=mock_result,
         ), patch.object(
             loop, "_persist_compaction_event",

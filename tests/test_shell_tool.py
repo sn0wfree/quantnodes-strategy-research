@@ -13,10 +13,21 @@ Covers:
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
 from strategy_research.core.agent.tools import ToolContext
+
+# A1 (2026-10-28): these suites drive POSIX commands (pwd/ls/sh/sleep/
+# python3) through the shell tool. On Windows there is no POSIX shell, so
+# they fail for environmental reasons, not product defects. The
+# platform-independent suites (Safety / Parameters / Registration /
+# Schema) keep running everywhere.
+_posix_shell_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX shell commands (pwd/ls/sh/sleep) unavailable on Windows",
+)
 
 # ── Test fixtures ──────────────────────────────────────────────────
 
@@ -38,6 +49,7 @@ def tmp_workspace(tmp_path):
 # ── Basic execution ────────────────────────────────────────────────
 
 
+@_posix_shell_only
 class TestShellExecBasic:
     def test_echo_returns_stdout(self, tool, tmp_workspace):
         result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command="echo hello"))
@@ -75,6 +87,7 @@ class TestShellExecBasic:
 # ── Exit codes ─────────────────────────────────────────────────────
 
 
+@_posix_shell_only
 class TestShellExecExitCodes:
     def test_nonzero_exit_code_reported(self, tool, tmp_workspace):
         result = json.loads(tool.execute(ctx=ToolContext(workspace=str(tmp_workspace)), command="exit 7"))
@@ -94,6 +107,7 @@ class TestShellExecExitCodes:
 # ── Timeout ────────────────────────────────────────────────────────
 
 
+@_posix_shell_only
 class TestShellExecTimeout:
     def test_timeout_returns_error(self, tool, tmp_workspace):
         result = json.loads(tool.execute(
@@ -153,6 +167,7 @@ class TestShellExecParameters:
 # ── Output truncation ──────────────────────────────────────────────
 
 
+@_posix_shell_only
 class TestShellExecTruncation:
     def test_large_stdout_truncated(self, tool, tmp_workspace):
         # 60KB of output, limit is 50_000
