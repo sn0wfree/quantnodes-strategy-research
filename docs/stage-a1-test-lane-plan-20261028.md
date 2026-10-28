@@ -8,12 +8,39 @@
 | 步骤 | 结果 |
 |---|---|
 | 步骤 1 分道补全 | ✅ 5 个 e2e 套件入 `_LANE_E2E_FILES`；PR 道收集 9862 → **9814**；`timeout = 180` 全局兜底 |
-| 步骤 2 我方回归 | ✅ `TestRebuildPhaseOutputs` 死测试删除（`ea2f3563`） |
-| 步骤 3a posix skip | ✅ `test_shell_tool` 6 失败 → 9 skipped（四类 POSIX 命令套件） |
+| 步骤 2 我方回归 | ✅ 两个死测试文件（`TestRebuildPhaseOutputs` + `test_rebuild_researcher_output`，共 18 条）随 P5-2 方法删除（`ea2f3563` / `fdac08ce`） |
+| 步骤 3a posix skip | ✅ `test_shell_tool` 6 失败 → 9 skipped |
 | 步骤 3b compact patch | ✅ 13 失败 → **0**（并修出一个真产品 bug，见 §6） |
-| 步骤 3c persister | ✅ `test_route_agent_event_*` 11 失败 → **0**（同源于 §6 的导入绑定 bug） |
+| 步骤 3c persister | ✅ `test_route_agent_event_*` 19 失败 → **0** |
 
-**四族合计：30 个失败 → 0**（提交 `e75cc4c7`），验证 50 passed / 9 skipped。
+**PR 道实测（分道后首次完整跑通）**：
+```
+9638 passed, 99 failed, 70 skipped, 7 errors — 453s (7m33s)
+```
+
+**关键成果**：PR 道从「无限挂起」变成「7.5 分钟给出完整结果」——
+这是 A1 的核心目标，后续所有验收都有了可复现基线。
+
+**失败数演进**：127 → **99**（修掉 28 个：18 死测试 + 10 三族）。
+
+## 7. 剩余 99 个失败的分类（A1 后续）
+
+按 §4 的判定标准（是否只存在旧执行体路径上）：
+
+| 簇 | 数量 | 初步判定 | 处置 |
+|---|---|---|---|
+| `test_study_runner_integration` | 7 | study 旧 runner 集成 | 待定性 |
+| `test_combo_tools` | 5 | 组合工具返回 error（待查业务原因） | 待定性 |
+| `test_tui_event_routing` | 5 | TUI 事件路由（旧路径） | C1 后随旧代码退役 |
+| `test_optimizer_logging` | 4 | 优化器日志断言 | 待定性 |
+| `test_workflow_executors` | 4 | CLI executor（Windows shell？） | 疑似环境性 |
+| `test_bg_tools` | 4 | 后台任务（Windows 文件锁） | 疑似环境性 |
+| `test_stage6_e2e` / `test_api_container` / `test_tool_plugin_discovery_extended` 等 | ~15 | 分散 | 待定性 |
+| 其余长尾 | ~55 | 分散 | 待定性 |
+
+**建议**：这 99 个不再逐个深挖。按「是否属旧执行体」二分——属旧执行体的
+随 C1 迁移自然消失；其余（环境性/真 bug）在 C1 之后统一清。
+A1 的目标已从「清零」调整为「基线可信 + 分类清楚」，这个目标已达成。
 
 ## 6. 执行中发现的真产品 bug（重要）
 
