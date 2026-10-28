@@ -443,6 +443,9 @@ class AgentLoop(
 
         self.context_hub = ContextHub()
         self.context_hub.register(build_prerun_context_provider(self, self._injectors))
+        # 注意：provider 在构造时对 order<0 成员做了一次性快照——
+        # self._injectors 构造后视为冻结（运行期增删 pre-run injector
+        # 不会反映到桥接；当前无消费者这么做）。
         # DSH-inspired: steering inbox for mid-loop message injection.
         self._inbox: asyncio.Queue = asyncio.Queue()
 

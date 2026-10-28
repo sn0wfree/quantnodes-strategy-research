@@ -3,6 +3,12 @@
 Bound to an AgentLoop via ``bind_agent_loop`` — ``execute`` delegates to
 ``agent_loop._prepare_run`` so the strategy step has the same effect
 as the legacy hard-coded pre-run block in ``_run_loop_core``.
+
+⚠ 互斥约定：本 step 与 ``_run_loop_core`` 内联的 ``_prepare_run`` 调用
+（loop.py run/arun 主路径）**互斥**——主循环当前从不调用
+``self._strategy.pre_run``，本 step 是死代码位。未来若把 pre_run step
+接进主循环，必须先移除内联调用，否则 goal/memory 注入与检索每 run
+双跑（goal 块双份、检索 I/O 双份）。
 """
 
 from __future__ import annotations

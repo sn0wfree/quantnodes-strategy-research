@@ -167,3 +167,99 @@ def test_injector_contracts_affect_accounting():
     assert bundle.accounting["total_tokens"] == sum(
         i.tokens for i in bundle.items
     )
+
+
+# ── 评审补强（多 agent 评审 2026-10-28）：真 injector 集成 ──
+
+
+class _StubMemory:
+    """记录检索 query 的 memory 假件（真 MemoryRetrieverInjector 消费）。"""
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def find_relevant(self, task: str, max_results: int = 5):
+        self.queries.append(task)
+        return [
+            SimpleNamespace(title="笔记", description="上轮动量策略已尝试"),
+        ]
+
+
+def _real_injectors(memory: _StubMemory, monkeypatch) -> list:
+    """真 GoalContextInjector（goal 上下文打桩）+ 真 MemoryRetrieverInjector。"""
+    from strategy_research.core.agent.context_injector import (
+        GoalContextInjector,
+        MemoryRetrieverInjector,
+    )
+
+    monkeypatch.setattr(
+        "strategy_research.core.goal.get_current_goal_context",
+        lambda session_id: (GOAL_BLOCK, None),
+    )
+    return [
+        GoalContextInjector(),
+        MemoryRetrieverInjector(memory=memory, max_results=3),
+    ]
+
+
+def test_real_injectors_via_hub_match_legacy(tmp_path, monkeypatch):
+    """真 injector 走 hub 路径与旧循环逐字节等价，且 memory 检索收到的
+    是 goal 拼接后的串（链式语义在真实现上成立，非仅假件）。"""
+    legacy_mem, hub_mem = _StubMemory(), _StubMemory()
+    injectors = _real_injectors(legacy_mem, monkeypatch)
+    loop = SimpleNamespace(
+        enable_goal_injection=True, enable_memory_injection=True,
+        session_id="s1",
+    )
+
+    legacy = _legacy_prerun(loop, injectors, TASK)
+
+    hub_injectors = _real_injectors(hub_mem, monkeypatch)
+    bridged = _hub_prerun(loop, hub_injectors, TASK)
+
+    assert legacy == bridged
+    # 桩 memory 命中一条 → 渲染序 memory 在前（真实现上复现链式叠加结果）
+    assert legacy == MEMORY_BLOCK + "\n\n" + GOAL_BLOCK + "\n\n" + TASK
+    # 链式语义：真 MemoryRetrieverInjector 收到的 query 含 goal 前缀
+    assert hub_mem.queries == [GOAL_BLOCK + "\n\n" + TASK]
+
+
+def test_real_memory_empty_task_yields_no_memory_contribution(monkeypatch):
+    """真 MemoryRetrieverInjector 的空 task 短路：无 memory 贡献
+    （设计文档 §6 验收项「空 task → 无贡献」的真实现钉版）。"""
+    from strategy_research.core.agent.context_injector import (
+        MemoryRetrieverInjector,
+    )
+
+    memory = _StubMemory()
+    injectors = [MemoryRetrieverInjector(memory=memory, max_results=3)]
+    loop = SimpleNamespace(enable_memory_injection=True, session_id="s1")
+
+    hub = ContextHub()
+    hub.register(build_prerun_context_provider(loop, injectors))
+    bundle = hub.build(ContextQuery(task_text=""))
+
+    assert bundle.items == []
+    assert memory.queries == []  # 短路：检索从未被调用
+
+
+def test_contract_violating_injector_is_skipped_not_garbled():
+    """前缀契约违约（追加式改写）：按无贡献降级 + 链继续，
+    不产出垃圾 block、不污染后续检索 query。"""
+    class _AppendingInjector:
+        name = "goal_context"
+        order = -100
+
+        def inject_pre_run(self, loop, task, messages):
+            return task + " [modified]"  # 违约：追加式
+
+    injectors = [_AppendingInjector()] + _make_injectors({})
+    loop = _make_loop()
+
+    hub = ContextHub()
+    hub.register(build_prerun_context_provider(loop, injectors))
+    bundle = hub.build(ContextQuery(task_text=TASK))
+
+    kinds = [i.kind for i in bundle.items]
+    assert kinds == ["memory", "goal"]  # 违约 injector 无贡献，链继续
+    assert all("[modified]" not in i.content for i in bundle.items)

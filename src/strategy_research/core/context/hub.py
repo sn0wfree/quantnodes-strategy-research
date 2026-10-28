@@ -78,6 +78,12 @@ class ContextHub:
         for provider in self._providers:
             try:
                 items = provider.provide(query)
+                if items is None:
+                    items = []
+                elif not isinstance(items, list):
+                    raise TypeError(
+                        f"returned {type(items).__name__}, expected list",
+                    )
             except Exception as exc:  # noqa: BLE001 — 不变式 4：故障降级
                 logger.warning(
                     "context provider %s failed: %s", provider.name, exc,

@@ -63,8 +63,18 @@ class PreRunContextProvider:
                 logger.debug("prerun injector %s failed: %s",
                              getattr(injector, "name", "?"), exc)
                 continue
-            if new_task == current or len(new_task) <= len(current) + 2:
-                continue  # 无贡献（开关关闭 / 空命中 / 违约的短返回）
+            if new_task == current:
+                continue  # 无贡献（开关关闭 / 空命中）
+            if len(new_task) <= len(current) + 2 or not new_task.endswith(current):
+                # 契约违约（追加式改写 / 缩短 / 变换）：无法可靠分解出
+                # 前缀块——按无贡献降级并告警，绝不把垃圾 block 喂进
+                # 渲染序或污染后续 injector 的检索 query。
+                logger.warning(
+                    "prerun injector %s violated the prefix contract "
+                    "(expected f'{block}\\n\\n{task}' or unchanged); skipped",
+                    getattr(injector, "name", "?"),
+                )
+                continue
             # 契约：注入型 injector 返回 f"{block}\n\n{task}"；提取块内容
             block = new_task[: len(new_task) - len(current) - 2]
             if not block:

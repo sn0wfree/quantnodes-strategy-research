@@ -53,8 +53,9 @@ ContextPlan 并入时的事。tokens 用 `token_utils.estimate_tokens` 统一口
 
 ## 5. 迁移点（AgentLoop）
 
-- `__init__`：构造 `ContextHub` + 注册 `PreRunContextProvider`（替代
-  `self._injectors` 的 pre-run 成员；todos/continuation 仍走
+- `__init__`：构造 `ContextHub` + 注册 `PreRunContextProvider`（provider
+  在构造时对 `_injectors` 的 order<0 成员做**一次性快照**作为桥接数据源
+  ——`_injectors` 构造后视为冻结；todos/continuation 仍走
   `self._injectors` 的 per-iteration/post-response 通路，不动）。
 - `_prepare_run`：`for injector order<0` 循环 →
   `hub.build(ContextQuery(task_text=full_task, session_id=...))` +
@@ -64,7 +65,9 @@ ContextPlan 并入时的事。tokens 用 `token_utils.estimate_tokens` 统一口
 - **契约收窄（如实记录）**：pre-run injector 从「任意 task 变换」收窄为
   **前缀注入**（`block + "\n\n" + task`）——hub 的 items+task 渲染契约
   表达不了任意变换；生态里仅有的两个真实实现（goal/memory）本就是
-  前缀式。`test_dsh_deep_integration` 的追加式假件已改为前缀式。
+  前缀式。违约 injector 由 endswith 守卫按无贡献降级 + 告警（不产出
+  垃圾块、不污染后续检索 query）。`test_dsh_deep_integration` 的追加式
+  假件已改为前缀式。
 
 ## 6. 测试
 
@@ -77,7 +80,28 @@ ContextPlan 并入时的事。tokens 用 `token_utils.estimate_tokens` 统一口
 - 回归：chat_loop / p2_e2e / dsh_deep_integration / role_factory /
   tool_brief / context_builder 全绿。
 
-## 7. 后续（W1/W2 尾项，不在本轮）
+## 7. 评审轮（2026-10-28，多 agent 并行）
+
+三切面并行评审（等价性切面因并发限额由其余切面覆盖）。实锤并已修复：
+
+| # | 发现 | 修复 |
+|---|---|---|
+| P1 | **架构门禁相对导入盲区**：AST `ImportFrom.node.module` 不含前导点，`from ..agent import x` 对两个门禁（hub 门禁 + platform→study）均漏检（本仓库平台包相对导入是主流写法 30+ 处） | `_imports` 按 `node.level` 解析为绝对名 + `from pkg import name` 子模块候选 + 边界感知匹配；PLATFORM_PKGS 纳入 context |
+| P1 | **hub 不变式 4 破洞**：`for item in items` 在 try 外，provider 返回非 list 直接 TypeError 外抛 | None 规范化为空贡献；非 list 在 try 内 raise → 降级 dropped |
+| P1 | **契约违约无守卫**：追加式 injector 会被长度算术切成垃圾块并污染链 | endswith 守卫：违约按无贡献降级 + warning |
+| P1 | **真 memory injector 零 hub 路径覆盖**：链式语义只有假件证明 | 补真 injector 集成测试（GoalContextInjector 打桩 + 真 MemoryRetrieverInjector + stub memory，逐字节等价 + 检索 query 链式断言 + 空 task 短路 + 违约降级） |
+| P2 | DefaultPreRunStep 若接进主循环会与内联 `_prepare_run` 双跑 | pre_run.py 模块 docstring 互斥约定 |
+| P2 | provider 构造时快照 `_injectors`，构造后变更失同步（旧路径每 run 重读） | loop.py 冻结声明注释 |
+| P3 | hub 边界无测试（tokens 预填/provider 覆写/None 返回）、docs 声称的「空 task」测试不存在 | 全部补齐（测试 19→29） |
+
+评审确认无问题项：等价性数学（渲染序反转逐字节一致）、无死代码残留、
+无第二消费者遗漏、无双跑活跃路径、循环 import 无风险、四条消费链
+（chat/study/workflow/swarm）均不传自定义 injectors、开销可忽略。
+另记录两个范围外发现：workflow/executors.py AgentLoopExecutor 传 `tools=`
+形参疑错（预存）；`test_default_injectors_loaded` 3→4 属修复 e97f3e94
+（2026-09-29）遗留的破窗而非掩盖回归。
+
+## 8. 后续（W1/W2 尾项，不在本轮）
 
 W1：todos provider 化（per-iteration）、记忆注入三改（ContextBuilder 的
 frozen snapshot + user-message recall 与 MemoryRetriever 合流）、链内

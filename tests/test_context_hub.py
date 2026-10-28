@@ -121,3 +121,64 @@ def test_empty_hub_yields_empty_bundle():
     assert bundle.items == []
     assert bundle.dropped == []
     assert bundle.accounting["total_tokens"] == 0
+
+
+# ── 评审补强（多 agent 评审 2026-10-28 发现的边界）──────────
+
+
+def test_provider_returning_non_list_degrades():
+    """不变式 4 的边界：provide 返回非 list 时降级为无贡献（dropped 记录），
+    返回 None 规范化为空贡献——两者都绝不外抛击穿 build。"""
+    hub = ContextHub()
+    hub.register(SimpleNamespace(
+        name="none_ret", scopes=frozenset({"session"}),
+        provide=lambda q: None,
+    ))
+    hub.register(SimpleNamespace(
+        name="bad_ret", scopes=frozenset({"session"}),
+        provide=lambda q: {"kind": "goal"},  # dict = 非 list
+    ))
+    hub.register(SimpleNamespace(
+        name="good", scopes=frozenset({"session"}),
+        provide=lambda q: [_item("memory", "m")],
+    ))
+
+    bundle = hub.build(ContextQuery(task_text="t"))
+
+    assert [i.provider for i in bundle.items] == ["good"]
+    reasons = {d["provider"]: d["reason"] for d in bundle.dropped}
+    # None = 温和契约（无贡献），不进 dropped；非 list = 违约，降级记录
+    assert "none_ret" not in reasons
+    assert "bad_ret" in reasons and "expected list" in reasons["bad_ret"]
+
+
+def test_prefilled_tokens_are_not_recomputed():
+    """provider 预填 tokens 时 hub 尊重该值（口径优先级钉死）。"""
+    hub = ContextHub()
+    hub.register(SimpleNamespace(
+        name="p", scopes=frozenset({"session"}),
+        provide=lambda q: [ContextItem(
+            kind="goal", content="短文本", source="s", provider="p",
+            tokens=999,
+        )],
+    ))
+
+    bundle = hub.build(ContextQuery(task_text="t"))
+
+    assert bundle.items[0].tokens == 999
+    assert bundle.accounting["total_tokens"] == 999
+
+
+def test_hub_overwrites_spoofed_provider_field():
+    """溯源一致性：item.provider 恒等于注册名，provider 自报值被覆写。"""
+    hub = ContextHub()
+    hub.register(SimpleNamespace(
+        name="registered", scopes=frozenset({"session"}),
+        provide=lambda q: [ContextItem(
+            kind="goal", content="c", source="s", provider="liar",
+        )],
+    ))
+
+    bundle = hub.build(ContextQuery(task_text="t"))
+
+    assert bundle.items[0].provider == "registered"

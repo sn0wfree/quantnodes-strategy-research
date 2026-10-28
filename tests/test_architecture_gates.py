@@ -9,7 +9,7 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "strategy_research"
-PLATFORM_PKGS = ("gateway", "orchestration", "runtimes", "storage")
+PLATFORM_PKGS = ("gateway", "orchestration", "runtimes", "storage", "context")
 
 
 def _iter_py(root: Path):
@@ -20,36 +20,71 @@ def _iter_py(root: Path):
 
 
 def _imports(path: Path) -> list[tuple[str, int]]:
-    """Return [(dotted module, lineno)] for every import in the file."""
+    """Return [(absolute dotted module, lineno)] for every import.
+
+    相对导入按文件所在包解析为绝对名（AST 的 ImportFrom.node.module 不含
+    前导点——``from ..agent import x`` 的 module 是 ``agent``，不解析就会
+    静默绕过所有前缀门禁）。``from pkg import name`` 的 name 可能是子模块，
+    一并发射 ``pkg.name`` 候选。
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    rel = path.relative_to(SRC).parts
+    pkg = ("strategy_research",) + rel[:-1]
     found: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                found.append((alias.name, node.lineno))
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            found.append((node.module, node.lineno))
+            found.extend((a.name, node.lineno) for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                anchor = pkg[: len(pkg) - (node.level - 1)]
+                base = ".".join(anchor)
+                if node.module:
+                    mods = [f"{base}.{node.module}"]
+                    mods += [f"{base}.{node.module}.{a.name}" for a in node.names]
+                else:
+                    mods = [f"{base}.{a.name}" for a in node.names]
+            else:
+                if node.module:
+                    mods = [node.module]
+                    mods += [f"{node.module}.{a.name}" for a in node.names]
+                else:
+                    mods = [a.name for a in node.names]
+            found.extend((m, node.lineno) for m in mods if m)
     return found
+
+
+def _matches(module: str, prefix: str) -> bool:
+    """边界感知前缀匹配（裸 startswith 会把 core.agentx 误判为 core.agent）。"""
+    return module == prefix or module.startswith(prefix + ".")
+
+
+def _violations(root: Path, prefixes: tuple[str, ...]) -> list[str]:
+    out: list[str] = []
+    for path in _iter_py(root):
+        for module, lineno in _imports(path):
+            if any(_matches(module, p) for p in prefixes):
+                out.append(f"{path.relative_to(SRC)}:{lineno} -> {module}")
+    return out
 
 
 # ── 依赖方向：平台 → 域 单向 ────────────────────────────
 
 
 def test_platform_never_imports_study_domain():
-    """core/{gateway,orchestration,runtimes,storage} 不得 import core/study。
+    """core/{gateway,orchestration,runtimes,storage,context} 不得 import core/study。
 
     research preset 作为域件住在 core/study/graph_preset.py 并 import
     GraphEngine——方向是 域→平台。反过来（平台 import 域）会把研究域
     变成平台的隐含依赖，破坏「⑤ 研究域独立成层」。
+    （相对导入由 _imports 解析为绝对名后匹配，无绕过空间。）
     """
-    violations: list[str] = []
+    all_v: list[str] = []
     for pkg in PLATFORM_PKGS:
-        for path in _iter_py(SRC / "core" / pkg):
-            for module, lineno in _imports(path):
-                if module.startswith("strategy_research.core.study") or \
-                        module.startswith("core.study"):
-                    violations.append(f"{path.relative_to(SRC)}:{lineno} -> {module}")
-    assert not violations, "平台层反向依赖研究域:\n" + "\n".join(violations)
+        all_v.extend(_violations(
+            SRC / "core" / pkg,
+            ("strategy_research.core.study", "core.study"),
+        ))
+    assert not all_v, "平台层反向依赖研究域:\n" + "\n".join(all_v)
 
 
 def test_context_hub_never_imports_producers():
@@ -58,17 +93,16 @@ def test_context_hub_never_imports_producers():
     ContextHub 三条硬约束之一（docs/context-hub-discussion.md §3）：
     「生产方注册进中枢，中枢从不 import 生产方」——否则它就是下一个
     上帝对象。生产方适配器住在 core/agent/context_providers.py，
-    方向是 域→平台。
+    方向是 域→平台。（相对导入由 _imports 解析为绝对名后匹配。）
+
+    已知豁免（平台→生产方，有意接线，非本门禁管辖）：
+    gateway/singleton.py import core.agent.builtin_tools（组合根装配）。
     """
-    violations: list[str] = []
-    for path in _iter_py(SRC / "core" / "context"):
-        for module, lineno in _imports(path):
-            if any(
-                module.startswith(f"strategy_research.core.{producer}")
-                or module.startswith(f"core.{producer}")
-                for producer in ("agent", "goal", "study")
-            ):
-                violations.append(f"{path.relative_to(SRC)}:{lineno} -> {module}")
+    violations = _violations(
+        SRC / "core" / "context",
+        tuple(f"strategy_research.core.{p}" for p in ("agent", "goal", "study"))
+        + tuple(f"core.{p}" for p in ("agent", "goal", "study")),
+    )
     assert not violations, "ContextHub 反向依赖生产方:\n" + "\n".join(violations)
 
 
